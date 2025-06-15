@@ -262,7 +262,7 @@ class SchoolMap {
       },
       (progress) => {
         const percent = (progress.loaded / progress.total * 100).toFixed(2);
-        console.log(`📊 Map loading progress: ${percent}%`);
+        //console.log(`📊 Map loading progress: ${percent}%`);
       },
       (error) => {
         console.error('❌ Error loading map model:', error);
