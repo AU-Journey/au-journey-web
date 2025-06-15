@@ -24,7 +24,7 @@ class TramMovement {
       return;
     }
     
-    console.log(`🚋 Starting tram movement with ${this.gpsPoints.length} GPS points`);
+    //console.log(`🚋 Starting tram movement with ${this.gpsPoints.length} GPS points`);
     this.isMoving = true;
     this.moveToNextPoint();
   }
@@ -35,7 +35,7 @@ class TramMovement {
       this.currentTween.kill();
       this.currentTween = null;
     }
-    console.log('🛑 Tram movement stopped');
+    //console.log('🛑 Tram movement stopped');
   }
 
   moveToNextPoint() {
@@ -58,7 +58,7 @@ class TramMovement {
 
     // Skip if distance is too small (duplicate/close points)
     if (distance < 0.5) {
-      console.log(`⏭️ Skipping point ${this.currentIndex} (too close: ${distance.toFixed(2)})`);
+      //console.log(`⏭️ Skipping point ${this.currentIndex} (too close: ${distance.toFixed(2)})`);
       this.currentIndex++;
       if (this.currentIndex >= this.gpsPoints.length) {
         this.currentIndex = 0; // Loop back to start
@@ -73,7 +73,7 @@ class TramMovement {
     // Calculate target rotation before starting movement
     const targetRotation = Math.atan2(dx, -dz); // Note: negative dz for correct orientation
 
-    console.log(`🚋 Point ${this.currentIndex}: distance=${distance.toFixed(2)}, duration=${duration.toFixed(2)}s, rotation=${(targetRotation * 180 / Math.PI).toFixed(1)}°`);
+    //console.log(`🚋 Point ${this.currentIndex}: distance=${distance.toFixed(2)}, duration=${duration.toFixed(2)}s, rotation=${(targetRotation * 180 / Math.PI).toFixed(1)}°`);
 
     // Create timeline for smooth movement and rotation
     const tl = gsap.timeline();
@@ -116,7 +116,7 @@ class TramMovement {
     
     // Loop back to start when reaching the end
     if (this.currentIndex >= this.gpsPoints.length) {
-      console.log('🔄 Looping back to start of route');
+      //console.log('🔄 Looping back to start of route');
       this.currentIndex = 0;
     }
 
@@ -151,13 +151,13 @@ class TramMovement {
       ease: 'power2.out'
     });
 
-    console.log(`📡 Updated tram position from live GPS: ${lat.toFixed(6)}, ${lon.toFixed(6)}`);
+    //console.log(`📡 Updated tram position from live GPS: ${lat.toFixed(6)}, ${lon.toFixed(6)}`);
   }
 
   // Method to set tram speed dynamically
   setSpeed(speed) {
     this.tramSpeed = Math.max(1, speed); // Minimum speed of 1
-    console.log(`🏃 Tram speed set to ${this.tramSpeed} units/second`);
+    //console.log(`🏃 Tram speed set to ${this.tramSpeed} units/second`);
   }
 
   // Get current progress information

@@ -212,7 +212,7 @@ class SchoolMap {
   }
 
   loadMapModel() {
-    console.log('🗺️ Loading map model...');
+    //console.log('🗺️ Loading map model...');
     const loader = new GLTFLoader();
     
     loader.load('/models/school_map.glb', 
@@ -252,10 +252,10 @@ class SchoolMap {
 
         this.addGPSDots();
         this.addRouteVisualization();
-        console.log('✅ Map model loaded successfully');
+        //console.log('✅ Map model loaded successfully');
       },
       (progress) => {
-        console.log('Loading progress:', (progress.loaded / progress.total * 100) + '%');
+        //console.log('Loading progress:', (progress.loaded / progress.total * 100) + '%');
       },
       (error) => {
         console.error('❌ Error loading map model:', error);
@@ -264,7 +264,7 @@ class SchoolMap {
   }
 
   loadTramModel() {
-    console.log('🚋 Loading tram model...');
+    //console.log('🚋 Loading tram model...');
     const loader = new GLTFLoader();
     
     loader.load('/models/tram.glb',
@@ -300,10 +300,10 @@ class SchoolMap {
 
         // Start tram movement
         this.tramMovement.start();
-        console.log('✅ Tram model loaded and movement started');
+        //console.log('✅ Tram model loaded and movement started');
       },
       (progress) => {
-        console.log('Tram loading progress:', (progress.loaded / progress.total * 100) + '%');
+        //console.log('Tram loading progress:', (progress.loaded / progress.total * 100) + '%');
       },
       (error) => {
         console.error('❌ Error loading tram model:', error);
@@ -336,7 +336,7 @@ class SchoolMap {
       this.scene.add(dot);
     });
 
-    console.log(`📍 Added ${this.gpsPoints.length} GPS dots`);
+    //console.log(`📍 Added ${this.gpsPoints.length} GPS dots`);
   }
 
   addRouteVisualization() {
@@ -361,7 +361,7 @@ class SchoolMap {
     line.name = 'route-line';
     this.scene.add(line);
 
-    console.log('📏 Added route visualization');
+    //console.log('📏 Added route visualization');
   }
 
   setupKeyboardControls() {
@@ -372,17 +372,17 @@ class SchoolMap {
         case ' ': // Spacebar to toggle movement
           if (this.tramMovement.isMoving) {
             this.tramMovement.stop();
-            console.log('⏸️ Tram movement paused');
+            //console.log('⏸️ Tram movement paused');
           } else {
             this.tramMovement.start();
-            console.log('▶️ Tram movement resumed');
+            //console.log('▶️ Tram movement resumed');
           }
           break;
         case 'r': // R to reset to first point
           this.tramMovement.stop();
           this.tramMovement.currentIndex = 0;
           this.tramMovement.start();
-          console.log('🔄 Tram reset to start');
+          //console.log('🔄 Tram reset to start');
           break;
         case '=':
         case '+': // Increase speed
@@ -394,7 +394,7 @@ class SchoolMap {
       }
     });
 
-    console.log('⌨️ Keyboard controls enabled: Space (pause/resume), R (reset), +/- (speed)');
+    //console.log('⌨️ Keyboard controls enabled: Space (pause/resume), R (reset), +/- (speed)');
   }
 
   updateTramPositionFromLiveGPS(lat, lon) {
