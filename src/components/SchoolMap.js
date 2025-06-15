@@ -215,7 +215,7 @@ class SchoolMap {
     //console.log('🗺️ Loading map model...');
     const loader = new GLTFLoader();
     
-    loader.load('/models/school_map.glb', 
+    loader.load('/au-journey-web/models/school_map.glb', 
       (gltf) => {
         this.mapModel = gltf.scene;
         this.mapModel.scale.set(1, 1, 1);
@@ -267,7 +267,7 @@ class SchoolMap {
     //console.log('🚋 Loading tram model...');
     const loader = new GLTFLoader();
     
-    loader.load('/models/tram.glb',
+    loader.load('/au-journey-web/models/tram.glb',
       (gltf) => {
         this.tram = gltf.scene;
         this.tram.scale.set(1, 1, 1);
