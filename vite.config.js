@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import { resolve } from 'path'
 
 export default defineConfig({
   base: '/au-journey-web/',
@@ -7,9 +8,9 @@ export default defineConfig({
     assetsDir: 'assets',
     rollupOptions: {
       input: {
-        main: './index.html',
+        main: resolve(__dirname, 'index.html'),
       },
     }
   },
-  publicDir: 'models',
+  publicDir: 'public',
 }) 

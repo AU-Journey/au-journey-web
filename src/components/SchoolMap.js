@@ -212,10 +212,10 @@ class SchoolMap {
   }
 
   loadMapModel() {
-    //console.log('🗺️ Loading map model...');
     const loader = new GLTFLoader();
+    const modelPath = import.meta.env.DEV ? '/models/school_map.glb' : '/au-journey-web/models/school_map.glb';
     
-    loader.load('/au-journey-web/models/school_map.glb', 
+    loader.load(modelPath, 
       (gltf) => {
         this.mapModel = gltf.scene;
         this.mapModel.scale.set(1, 1, 1);
@@ -252,10 +252,8 @@ class SchoolMap {
 
         this.addGPSDots();
         this.addRouteVisualization();
-        //console.log('✅ Map model loaded successfully');
       },
       (progress) => {
-        //console.log('Loading progress:', (progress.loaded / progress.total * 100) + '%');
       },
       (error) => {
         console.error('❌ Error loading map model:', error);
@@ -264,10 +262,10 @@ class SchoolMap {
   }
 
   loadTramModel() {
-    //console.log('🚋 Loading tram model...');
     const loader = new GLTFLoader();
+    const modelPath = import.meta.env.DEV ? '/models/tram.glb' : '/au-journey-web/models/tram.glb';
     
-    loader.load('/au-journey-web/models/tram.glb',
+    loader.load(modelPath,
       (gltf) => {
         this.tram = gltf.scene;
         this.tram.scale.set(1, 1, 1);
@@ -300,10 +298,8 @@ class SchoolMap {
 
         // Start tram movement
         this.tramMovement.start();
-        //console.log('✅ Tram model loaded and movement started');
       },
       (progress) => {
-        //console.log('Tram loading progress:', (progress.loaded / progress.total * 100) + '%');
       },
       (error) => {
         console.error('❌ Error loading tram model:', error);
