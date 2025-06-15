@@ -212,11 +212,17 @@ class SchoolMap {
   }
 
   loadMapModel() {
+    console.log('🗺️ Starting to load map model...');
     const loader = new GLTFLoader();
-    const modelPath = import.meta.env.DEV ? '/models/school_map.glb' : '/au-journey-web/models/school_map.glb';
+    
+    // Get base URL for assets
+    const baseUrl = import.meta.env.BASE_URL || '/';
+    const modelPath = `${baseUrl}models/school_map.glb`;
+    console.log('📍 Attempting to load map from:', modelPath);
     
     loader.load(modelPath, 
       (gltf) => {
+        console.log('✅ Map model loaded successfully');
         this.mapModel = gltf.scene;
         this.mapModel.scale.set(1, 1, 1);
         
@@ -236,6 +242,7 @@ class SchoolMap {
         });
 
         this.scene.add(this.mapModel);
+        console.log('✅ Map added to scene');
 
         // Auto-center camera
         const box = new THREE.Box3().setFromObject(this.mapModel);
@@ -254,19 +261,28 @@ class SchoolMap {
         this.addRouteVisualization();
       },
       (progress) => {
+        const percent = (progress.loaded / progress.total * 100).toFixed(2);
+        console.log(`📊 Map loading progress: ${percent}%`);
       },
       (error) => {
         console.error('❌ Error loading map model:', error);
+        console.error('Failed path:', modelPath);
       }
     );
   }
 
   loadTramModel() {
+    console.log('🚋 Starting to load tram model...');
     const loader = new GLTFLoader();
-    const modelPath = import.meta.env.DEV ? '/models/tram.glb' : '/au-journey-web/models/tram.glb';
+    
+    // Get base URL for assets
+    const baseUrl = import.meta.env.BASE_URL || '/';
+    const modelPath = `${baseUrl}models/tram.glb`;
+    console.log('📍 Attempting to load tram from:', modelPath);
     
     loader.load(modelPath,
       (gltf) => {
+        console.log('✅ Tram model loaded successfully');
         this.tram = gltf.scene;
         this.tram.scale.set(1, 1, 1);
 
@@ -287,6 +303,7 @@ class SchoolMap {
         );
 
         this.scene.add(this.tram);
+        console.log('✅ Tram added to scene');
 
         // Initialize tram movement
         this.tramMovement = new TramMovement(
@@ -300,9 +317,12 @@ class SchoolMap {
         this.tramMovement.start();
       },
       (progress) => {
+        const percent = (progress.loaded / progress.total * 100).toFixed(2);
+        console.log(`📊 Tram loading progress: ${percent}%`);
       },
       (error) => {
         console.error('❌ Error loading tram model:', error);
+        console.error('Failed path:', modelPath);
       }
     );
   }
