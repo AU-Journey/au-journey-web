@@ -14,8 +14,15 @@ class TramMovement {
     this.currentTween = null;
     
     // Speed settings (units per second)
-    this.tramSpeed = 15; // Adjust this for faster/slower movement
+    this.tramSpeed = 30; // Adjusted for the new scale
     this.rotationSpeed = 2; // How fast the tram rotates to face direction
+
+    // Log initial setup
+    const firstPos = this.gpsTo3DCoords(gpsPoints[0].lat, gpsPoints[0].lon);
+    console.log('TramMovement initialized:', {
+      startPosition: firstPos,
+      totalPoints: gpsPoints.length
+    });
   }
 
   start() {
@@ -42,51 +49,48 @@ class TramMovement {
     if (!this.isMoving || this.currentIndex >= this.gpsPoints.length) return;
 
     const gps = this.gpsPoints[this.currentIndex];
-    const rawPos = this.gpsTo3DCoords(gps.lat, gps.lon);
+    const targetPos = this.gpsTo3DCoords(gps.lat, gps.lon);
     
-    // Apply offset and maintain consistent height
-    const targetPos = {
-      x: rawPos.x + this.offset.x,
-      y: this.baseHeight, // Keep tram at consistent height
-      z: rawPos.z + this.offset.z
+    // No need to apply offset since it's handled in the conversion
+    const position = {
+      x: targetPos.x,
+      y: this.baseHeight,
+      z: targetPos.z
     };
 
     // Calculate distance to target
-    const dx = targetPos.x - this.tram.position.x;
-    const dz = targetPos.z - this.tram.position.z;
+    const dx = position.x - this.tram.position.x;
+    const dz = position.z - this.tram.position.z;
     const distance = Math.sqrt(dx * dx + dz * dz);
 
-    // Skip if distance is too small (duplicate/close points)
-    if (distance < 0.5) {
-      //console.log(`⏭️ Skipping point ${this.currentIndex} (too close: ${distance.toFixed(2)})`);
+    // Skip if distance is too small
+    if (distance < 1) {
       this.currentIndex++;
       if (this.currentIndex >= this.gpsPoints.length) {
-        this.currentIndex = 0; // Loop back to start
+        this.currentIndex = 0;
       }
       setTimeout(() => this.moveToNextPoint(), 100);
       return;
     }
 
-    // Calculate realistic duration based on speed
+    // Calculate duration based on speed and distance
     const duration = Math.max(0.5, distance / this.tramSpeed);
 
-    // Calculate target rotation before starting movement
-    const targetRotation = Math.atan2(dx, -dz); // Note: negative dz for correct orientation
+    // Calculate rotation to face movement direction
+    const targetRotation = Math.atan2(dx, dz);
 
-    //console.log(`🚋 Point ${this.currentIndex}: distance=${distance.toFixed(2)}, duration=${duration.toFixed(2)}s, rotation=${(targetRotation * 180 / Math.PI).toFixed(1)}°`);
-
-    // Create timeline for smooth movement and rotation
+    // Create timeline for movement
     const tl = gsap.timeline();
 
-    // First rotate to face the direction (if needed)
+    // Handle rotation
     const currentRotation = this.tram.rotation.y;
     let rotationDiff = targetRotation - currentRotation;
     
-    // Handle rotation wrapping (choose shortest path)
+    // Handle rotation wrapping
     if (rotationDiff > Math.PI) rotationDiff -= 2 * Math.PI;
     if (rotationDiff < -Math.PI) rotationDiff += 2 * Math.PI;
 
-    if (Math.abs(rotationDiff) > 0.1) { // Only rotate if significant difference
+    if (Math.abs(rotationDiff) > 0.1) {
       tl.to(this.tram.rotation, {
         duration: Math.min(0.5, Math.abs(rotationDiff) / this.rotationSpeed),
         y: currentRotation + rotationDiff,
@@ -94,17 +98,17 @@ class TramMovement {
       });
     }
 
-    // Then move to the target position
+    // Move to target
     tl.to(this.tram.position, {
       duration: duration,
-      x: targetPos.x,
-      y: targetPos.y,
-      z: targetPos.z,
+      x: position.x,
+      y: position.y,
+      z: position.z,
       ease: 'power1.inOut',
       onComplete: () => {
         this.onPointReached();
       }
-    }, ">-0.2"); // Start movement slightly before rotation finishes
+    }, ">-0.2");
 
     this.currentTween = tl;
   }

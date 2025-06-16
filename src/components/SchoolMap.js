@@ -7,8 +7,8 @@ import TramMovement from './TramMovement';
 class SchoolMap {
   constructor(container) {
     this.container = container;
-    this.origin = this.gpsTo3DCoords(13.612250851950218, 100.83675678938899);
-    this.offset = new THREE.Vector3(200, 0, -500);
+    // Remove GPS conversion related properties
+    this.offset = new THREE.Vector3(-300, 0, -30);
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -205,33 +205,32 @@ class SchoolMap {
     window.addEventListener('resize', this.onWindowResize.bind(this));
   }
 
+  // Simplify to just return Three.js coordinates directly
   gpsTo3DCoords(lat, lon) {
-    const x = -30392.5743 * lon + -101453.9810 * lat + 4619483.1813;
-    const z = -114233.6226 * lon + 31468.6022 * lat + 9802466.3411;
-    return { x, y: 0, z };
+    // Use a simple scaling to keep the points visible but maintain their relative positions
+    return {
+        x: lat * 1000,  // Simple scaling to make points visible
+        y: 0,
+        z: lon * 1000
+    };
   }
 
   loadMapModel() {
     console.log('🗺️ Starting to load map model...');
     const loader = new GLTFLoader();
     
-    // Get base URL for assets
     const baseUrl = import.meta.env.BASE_URL || '/';
     const modelPath = `${baseUrl}models/school_map.glb`;
-    console.log('📍 Attempting to load map from:', modelPath);
     
     loader.load(modelPath, 
       (gltf) => {
         console.log('✅ Map model loaded successfully');
         this.mapModel = gltf.scene;
-        this.mapModel.scale.set(1, 1, 1);
         
-        // Position map model
-        this.mapModel.position.set(
-          this.origin.x + this.offset.x, 
-          0, 
-          this.origin.z + this.offset.z
-        );
+        // Set calibrated position, rotation, and scale
+        this.mapModel.scale.set(0.908, 0.908, 0.908);
+        this.mapModel.rotation.y = THREE.MathUtils.degToRad(165); // Convert 165 degrees to radians
+        this.mapModel.position.set(-300, 0, 220);
 
         // Enable shadows
         this.mapModel.traverse((child) => {
@@ -242,31 +241,18 @@ class SchoolMap {
         });
 
         this.scene.add(this.mapModel);
-        console.log('✅ Map added to scene');
 
-        // Auto-center camera
-        const box = new THREE.Box3().setFromObject(this.mapModel);
-        const center = new THREE.Vector3();
-        box.getCenter(center);
-
-        this.camera.position.set(center.x, center.y + 150, center.z + 300);
-        this.camera.lookAt(center);
-
-        if (this.controls) {
-          this.controls.target.copy(center);
-          this.controls.update();
-        }
+        // Keep the adjustment controls for fine-tuning if needed
+        this.setupMapAdjustmentControls();
 
         this.addGPSDots();
         this.addRouteVisualization();
       },
       (progress) => {
         const percent = (progress.loaded / progress.total * 100).toFixed(2);
-        //console.log(`📊 Map loading progress: ${percent}%`);
       },
       (error) => {
         console.error('❌ Error loading map model:', error);
-        console.error('Failed path:', modelPath);
       }
     );
   }
@@ -275,16 +261,16 @@ class SchoolMap {
     console.log('🚋 Starting to load tram model...');
     const loader = new GLTFLoader();
     
-    // Get base URL for assets
     const baseUrl = import.meta.env.BASE_URL || '/';
     const modelPath = `${baseUrl}models/tram.glb`;
-    console.log('📍 Attempting to load tram from:', modelPath);
     
     loader.load(modelPath,
       (gltf) => {
         console.log('✅ Tram model loaded successfully');
         this.tram = gltf.scene;
-        this.tram.scale.set(1, 1, 1);
+
+        // Scale tram to match map scale
+        this.tram.scale.set(0.908, 0.908, 0.908);
 
         // Enable shadows
         this.tram.traverse((child) => {
@@ -295,34 +281,45 @@ class SchoolMap {
         });
 
         // Position tram at first GPS point
-        const firstGPS = this.gpsTo3DCoords(this.gpsPoints[0].lat, this.gpsPoints[0].lon);
-        this.tram.position.set(
-          firstGPS.x + this.offset.x, 
-          2, // Slightly above ground
-          firstGPS.z + this.offset.z
-        );
+        const firstPoint = this.gpsPoints[0];
+        // Use the same GPS scaling as dots
+        const scale = 100000;
+        const centerLat = (this.gpsPoints[0].lat + this.gpsPoints[this.gpsPoints.length - 1].lat) / 2;
+        const centerLon = (this.gpsPoints[0].lon + this.gpsPoints[this.gpsPoints.length - 1].lon) / 2;
+        
+        // Calculate initial position
+        const x = (firstPoint.lat - centerLat) * scale;
+        const z = (firstPoint.lon - centerLon) * scale;
+        
+        this.tram.position.set(x, 2, z);
+        console.log('Initial tram position:', { x, z });
 
         this.scene.add(this.tram);
         console.log('✅ Tram added to scene');
 
-        // Initialize tram movement
+        // Initialize tram movement with the same coordinate system
         this.tramMovement = new TramMovement(
-          this.tram, 
-          this.gpsTo3DCoords.bind(this), 
-          this.gpsPoints, 
-          this.offset
+          this.tram,
+          (lat, lon) => {
+            // Use the same GPS to 3D conversion as the dots
+            return {
+              x: (lat - centerLat) * scale,
+              y: 2,
+              z: (lon - centerLon) * scale
+            };
+          },
+          this.gpsPoints,
+          new THREE.Vector3(0, 0, 0) // No offset needed since we're using centered coordinates
         );
 
-        // Start tram movement
-        this.tramMovement.start();
+        // Don't start movement yet
+        console.log('Tram movement initialized but not started');
       },
       (progress) => {
         const percent = (progress.loaded / progress.total * 100).toFixed(2);
-        console.log(`📊 Tram loading progress: ${percent}%`);
       },
       (error) => {
         console.error('❌ Error loading tram model:', error);
-        console.error('Failed path:', modelPath);
       }
     );
   }
@@ -333,26 +330,76 @@ class SchoolMap {
       transparent: true,
       opacity: 0.8
     });
-    const geometry = new THREE.SphereGeometry(1.5, 12, 12);
+    // Keep point size reasonable
+    const geometry = new THREE.SphereGeometry(5, 12, 12);
 
-    if (!this.gpsPoints || this.gpsPoints.length === 0) {
-      console.warn('⚠️ No GPS points found!');
-      return;
-    }
+    // Add first and last points with different colors
+    const firstPoint = this.gpsPoints[0];
+    const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
+    
+    // Calculate center point of GPS coordinates for better positioning
+    const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
+    const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
+    
+    // Increase scale factor much more to make the path more visible
+    // Since GPS differences are around 0.003 degrees, we need a larger scale
+    const scale = 100000;
+    
+    // First point (blue)
+    const firstDot = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({ color: 0x0000ff, transparent: true, opacity: 0.8 })
+    );
+    firstDot.position.set(
+      (firstPoint.lat - centerLat) * scale,
+      4,
+      (firstPoint.lon - centerLon) * scale
+    );
+    this.scene.add(firstDot);
+    console.log('Blue point position:', firstDot.position);
+    console.log('Blue point GPS:', firstPoint);
+    
+    // Last point (green)
+    const lastDot = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 })
+    );
+    lastDot.position.set(
+      (lastPoint.lat - centerLat) * scale,
+      4,
+      (lastPoint.lon - centerLon) * scale
+    );
+    this.scene.add(lastDot);
+    console.log('Green point position:', lastDot.position);
+    console.log('Green point GPS:', lastPoint);
 
+    // Add remaining points
     this.gpsPoints.forEach((gps, i) => {
-      const pos = this.gpsTo3DCoords(gps.lat, gps.lon);
+      if (i === 0 || i === this.gpsPoints.length - 1) return;
+      
       const dot = new THREE.Mesh(geometry, material);
       dot.position.set(
-        pos.x + this.offset.x, 
-        1, // Slightly above ground
-        pos.z + this.offset.z
+        (gps.lat - centerLat) * scale,
+        2,
+        (gps.lon - centerLon) * scale
       );
       dot.name = `gps-dot-${i}`;
       this.scene.add(dot);
     });
 
-    //console.log(`📍 Added ${this.gpsPoints.length} GPS dots`);
+    // Log the GPS coordinate differences and scaled distances for debugging
+    const latDiff = lastPoint.lat - firstPoint.lat;
+    const lonDiff = lastPoint.lon - firstPoint.lon;
+    console.log('GPS Differences:', {
+      latDiff,
+      lonDiff,
+      scaledLatDiff: latDiff * scale,
+      scaledLonDiff: lonDiff * scale,
+      distanceInDegrees: Math.sqrt(
+        Math.pow(latDiff, 2) + 
+        Math.pow(lonDiff, 2)
+      )
+    });
   }
 
   addRouteVisualization() {
@@ -475,6 +522,53 @@ class SchoolMap {
     if (this.tramMovement) {
       this.tramMovement.setSpeed(speed);
     }
+  }
+
+  // Add new method for map rotation controls
+  setupMapAdjustmentControls() {
+    window.addEventListener('keydown', (event) => {
+        if (!this.mapModel) return;
+
+        const moveStep = 10;
+        const rotateStep = Math.PI / 36; // 5 degrees
+
+        switch(event.key.toLowerCase()) {
+            case 'arrowup':
+                this.mapModel.position.z -= moveStep;
+                break;
+            case 'arrowdown':
+                this.mapModel.position.z += moveStep;
+                break;
+            case 'arrowleft':
+                this.mapModel.position.x -= moveStep;
+                break;
+            case 'arrowright':
+                this.mapModel.position.x += moveStep;
+                break;
+            case 'q':
+                this.mapModel.rotation.y += rotateStep;
+                break;
+            case 'e':
+                this.mapModel.rotation.y -= rotateStep;
+                break;
+            case '[':
+                this.mapModel.scale.multiplyScalar(0.9);
+                break;
+            case ']':
+                this.mapModel.scale.multiplyScalar(1.1);
+                break;
+        }
+
+        // Log current map transform for debugging
+        console.log('Map position:', this.mapModel.position);
+        console.log('Map rotation:', THREE.MathUtils.radToDeg(this.mapModel.rotation.y));
+        console.log('Map scale:', this.mapModel.scale);
+    });
+
+    console.log('Map adjustment controls enabled:');
+    console.log('Arrow keys: Move map');
+    console.log('Q/E: Rotate map');
+    console.log('[/]: Scale map down/up');
   }
 }
 
