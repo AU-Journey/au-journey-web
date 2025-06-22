@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import gsap from 'gsap';
 import TramMovement from './TramMovement.js';
+import LoadingUI from './LoadingUI';
 
 class SchoolMap {
   constructor(container) {
@@ -15,9 +17,11 @@ class SchoolMap {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.controls = null;
     this.mapModel = null;
-    this.tram = null;
-    this.simpleTram = null; // Simple object to act as tram
     this.tramMovement = null;
+
+    // Loading UI
+    this.loadingUI = new LoadingUI();
+    this.loadingUI.show();
 
     this.init();
 
@@ -168,9 +172,12 @@ class SchoolMap {
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.setClearColor(0xbfd1e5); // Set a solid background color to help with grass flickering
+    this.renderer.shadowMap.autoUpdate = false; // For performance, update only when needed
     this.container.appendChild(this.renderer.domElement);
 
-    // Camera setup
+    // Camera setup: focus near tram start
+    // We'll set the camera after tram is loaded, but set a reasonable default here
     this.camera.position.set(0, 20, 50);
     this.camera.lookAt(0, 0, 0);
 
@@ -189,11 +196,15 @@ class SchoolMap {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
-    this.controls.maxPolarAngle = Math.PI / 2; // Prevent camera from going below ground
+    this.controls.maxPolarAngle = Math.PI / 2.1; // Prevent camera from going below ground
+    this.controls.minDistance = 20; // Prevent zooming too close
+    this.controls.maxDistance = 200; // Prevent zooming too far
 
     // Load models
     this.loadMapModel();
-    this.loadTramModel(); // Keep original tram loading for now
+
+    // Load tram model and place at first GPS point
+    this.loadTramFBXModel();
 
     // Start animation loop
     this.animate();
@@ -225,7 +236,6 @@ class SchoolMap {
   }
 
   loadMapModel() {
-    console.log('🗺️ Starting to load map model...');
     const loader = new GLTFLoader();
     
     const baseUrl = import.meta.env.BASE_URL || '/';
@@ -233,12 +243,11 @@ class SchoolMap {
     
     loader.load(modelPath, 
       (gltf) => {
-        console.log('✅ Map model loaded successfully');
         this.mapModel = gltf.scene;
         
         // Set calibrated position, rotation, and scale
         this.mapModel.scale.set(0.908, 0.908, 0.908);
-        this.mapModel.rotation.y = THREE.MathUtils.degToRad(165); // Convert 165 degrees to radians
+        this.mapModel.rotation.y = THREE.MathUtils.degToRad(165);
         this.mapModel.position.set(-300, 0, 220);
 
         // Enable shadows
@@ -251,6 +260,9 @@ class SchoolMap {
 
         this.scene.add(this.mapModel);
 
+        // Hide loading UI after map is loaded
+        if (this.loadingUI) this.loadingUI.hide();
+
         // Keep the adjustment controls for fine-tuning if needed
         this.setupMapAdjustmentControls();
 
@@ -261,60 +273,7 @@ class SchoolMap {
         const percent = (progress.loaded / progress.total * 100).toFixed(2);
       },
       (error) => {
-        console.error('❌ Error loading map model:', error);
-      }
-    );
-  }
-
-  loadTramModel() {
-    console.log('🚋 Starting to load tram model...');
-    const loader = new GLTFLoader();
-    
-    const baseUrl = import.meta.env.BASE_URL || '/';
-    const modelPath = `${baseUrl}models/tram.glb`;
-    
-    loader.load(modelPath,
-      (gltf) => {
-        console.log('✅ Tram model loaded successfully');
-        this.tram = gltf.scene;
-
-        // Scale tram to match map scale
-        this.tram.scale.set(0.908, 0.908, 0.908);
-
-        // Enable shadows
-        this.tram.traverse((child) => {
-          if (child.isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-          }
-        });
-
-        // Position tram at the first GPS point - same logic as GPS dots
-        const firstPoint = this.gpsPoints[0];
-        const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
-        const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
-        const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
-        const scale = 100000;
-        
-        const calculatedPos = {
-          x: (firstPoint.lat - centerLat) * scale,
-          y: 2,
-          z: (firstPoint.lon - centerLon) * scale
-        };
-        
-        this.tram.position.set(calculatedPos.x, calculatedPos.y, calculatedPos.z);
-        
-        this.scene.add(this.tram);
-        console.log('✅ Tram added to scene at GPS-aligned position:', this.tram.position);
-        
-        // Create simple tram and initialize movement system
-        this.createSimpleTram();
-      },
-      (progress) => {
-        const percent = (progress.loaded / progress.total * 100).toFixed(2);
-      },
-      (error) => {
-        console.error('❌ Error loading tram model:', error);
+        console.error('Error loading map model:', error);
       }
     );
   }
@@ -325,8 +284,8 @@ class SchoolMap {
       transparent: true,
       opacity: 0.8
     });
-    // Keep point size reasonable
-    const geometry = new THREE.SphereGeometry(5, 12, 12);
+    // Reduce point size for red dots
+    const geometry = new THREE.SphereGeometry(2, 10, 10);
 
     // Add first and last points with different colors
     const firstPoint = this.gpsPoints[0];
@@ -352,6 +311,7 @@ class SchoolMap {
     };
     firstDot.position.set(firstDotPos.x, firstDotPos.y, firstDotPos.z);
     this.scene.add(firstDot);
+    console.log('Blue dot position:', firstDotPos);
     
     // Last point (green)
     const lastDot = new THREE.Mesh(
@@ -418,27 +378,10 @@ class SchoolMap {
       const tramRotateStep = Math.PI / 72; // 2.5 degrees for tram - more precise rotation
 
       // Tram movement controls
-      switch(event.key) {
-        case ' ': // Spacebar to toggle tram movement
-          event.preventDefault();
-          this.toggleTramMovement();
-          return;
-        case '+':
-        case '=':
-          if (this.tramMovement) {
-            const currentSpeed = this.tramMovement.tramSpeed;
-            this.setTramSpeed(currentSpeed + 5);
-            console.log(`🏃 Tram speed increased to ${currentSpeed + 5}`);
-          }
-          return;
-        case '-':
-        case '_':
-          if (this.tramMovement) {
-            const currentSpeed = this.tramMovement.tramSpeed;
-            this.setTramSpeed(Math.max(5, currentSpeed - 5));
-            console.log(`🐌 Tram speed decreased to ${Math.max(5, currentSpeed - 5)}`);
-          }
-          return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        this.toggleTramMovement();
+        return;
       }
 
       // Map controls with arrow keys
@@ -446,82 +389,31 @@ class SchoolMap {
         switch(event.key.toLowerCase()) {
           case 'arrowup':
             this.mapModel.position.z -= moveStep;
-            console.log('Map position:', this.mapModel.position);
             break;
           case 'arrowdown':
             this.mapModel.position.z += moveStep;
-            console.log('Map position:', this.mapModel.position);
             break;
           case 'arrowleft':
             this.mapModel.position.x -= moveStep;
-            console.log('Map position:', this.mapModel.position);
             break;
           case 'arrowright':
             this.mapModel.position.x += moveStep;
-            console.log('Map position:', this.mapModel.position);
             break;
           case 'q':
             this.mapModel.rotation.y += mapRotateStep;
-            console.log('Map rotation:', THREE.MathUtils.radToDeg(this.mapModel.rotation.y));
             break;
           case 'e':
             this.mapModel.rotation.y -= mapRotateStep;
-            console.log('Map rotation:', THREE.MathUtils.radToDeg(this.mapModel.rotation.y));
             break;
           case '[':
             this.mapModel.scale.multiplyScalar(0.9);
-            console.log('Map scale:', this.mapModel.scale);
             break;
           case ']':
             this.mapModel.scale.multiplyScalar(1.1);
-            console.log('Map scale:', this.mapModel.scale);
-            break;
-        }
-      }
-
-      // Simple tram controls with WASD
-      if (this.simpleTram) {
-        // Store current rotation for movement direction
-        const currentRotation = this.simpleTram.rotation.y;
-        
-        switch(event.key.toLowerCase()) {
-          case 'w': // Forward in tram's direction
-            this.simpleTram.position.x += Math.sin(currentRotation) * moveStep;
-            this.simpleTram.position.z += Math.cos(currentRotation) * moveStep;
-            break;
-          case 's': // Backward in tram's direction
-            this.simpleTram.position.x -= Math.sin(currentRotation) * moveStep;
-            this.simpleTram.position.z -= Math.cos(currentRotation) * moveStep;
-            break;
-          case 'a': // Strafe left relative to tram's direction
-            this.simpleTram.position.x -= Math.cos(currentRotation) * moveStep;
-            this.simpleTram.position.z += Math.sin(currentRotation) * moveStep;
-            break;
-          case 'd': // Strafe right relative to tram's direction
-            this.simpleTram.position.x += Math.cos(currentRotation) * moveStep;
-            this.simpleTram.position.z -= Math.sin(currentRotation) * moveStep;
-            break;
-          case 'r': // Rotate left
-            this.simpleTram.rotation.y += tramRotateStep;
-            this.simpleTram.rotation.y = this.simpleTram.rotation.y % (Math.PI * 2);
-            break;
-          case 't': // Rotate right
-            this.simpleTram.rotation.y -= tramRotateStep;
-            if (this.simpleTram.rotation.y < 0) {
-              this.simpleTram.rotation.y += Math.PI * 2;
-            }
-            break;
-          case 'f': // Scale down
-            this.simpleTram.scale.multiplyScalar(0.95);
-            break;
-          case 'g': // Scale up
-            this.simpleTram.scale.multiplyScalar(1.05);
             break;
         }
       }
     });
-
-    console.log('Controls: SPACE=Start/Stop tram, +/-=Speed, WASD=Manual, Arrows=Map');
   }
 
   enableClickToLogPosition() {
@@ -537,8 +429,7 @@ class SchoolMap {
       const intersects = raycaster.intersectObjects(this.scene.children, true);
       if (intersects.length > 0) {
         const point = intersects[0].point;
-        console.log(`🟢 Clicked Position: x=${point.x.toFixed(2)}, y=${point.y.toFixed(2)}, z=${point.z.toFixed(2)}`);
-
+        
         // Add temporary marker
         const dot = new THREE.Mesh(
           new THREE.SphereGeometry(2, 8, 8),
@@ -574,72 +465,21 @@ class SchoolMap {
     this.renderer.render(this.scene, this.camera);
   }
 
-  // Create simple tram object
-  createSimpleTram() {
-    console.log('🚋 Creating simple tram object...');
-    
-    // Create a simple box that looks like a tram
-    const geometry = new THREE.BoxGeometry(12, 4, 8); // Width, Height, Depth
-    const material = new THREE.MeshLambertMaterial({ 
-      color: 0x0066cc, // Blue color for the tram
-      transparent: false
-    });
-    
-    this.simpleTram = new THREE.Mesh(geometry, material);
-    this.simpleTram.name = 'simple-tram';
-    
-    // Add some details to make it look more like a tram
-    const roofGeometry = new THREE.BoxGeometry(12, 1, 8);
-    const roofMaterial = new THREE.MeshLambertMaterial({ color: 0x004499 });
-    const roof = new THREE.Mesh(roofGeometry, roofMaterial);
-    roof.position.y = 2.5;
-    this.simpleTram.add(roof);
-    
-    // Position at first GPS point - same logic as GPS dots
+  // Shared method to position both trams at the starting point
+  positionTramAtStartPoint() {
     const firstPoint = this.gpsPoints[0];
     const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
     const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
     const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
     const scale = 100000;
     
-    this.simpleTram.position.set(
-      (firstPoint.lat - centerLat) * scale,
-      2, // Ground level
-      (firstPoint.lon - centerLon) * scale
-    );
+    const position = {
+      x: (firstPoint.lat - centerLat) * scale,
+      y: 2, // Ground level
+      z: (firstPoint.lon - centerLon) * scale
+    };
     
-    // Enable shadows
-    this.simpleTram.castShadow = true;
-    this.simpleTram.receiveShadow = true;
-    roof.castShadow = true;
-    
-    this.scene.add(this.simpleTram);
-    console.log('✅ Simple tram created at position:', this.simpleTram.position);
-    
-    // Initialize movement system immediately
-    this.initializeTramMovement();
-  }
-
-  // Initialize tram movement system
-  initializeTramMovement() {
-    if (!this.simpleTram) {
-      console.warn('⚠️ Cannot initialize tram movement: simple tram not created');
-      return;
-    }
-
-    // Create TramMovement instance using simple tram
-    this.tramMovement = new TramMovement(
-      this.simpleTram,
-      null, // No longer needed since we use direct coordinate calculation
-      this.gpsPoints,
-      new THREE.Vector3(0, 0, 0) // No offset needed
-    );
-
-    console.log('🚋 Simple tram movement system initialized');
-    console.log('🎮 Press SPACE to start/stop tram movement');
-    
-    // Add current target indicator
-    this.addTargetIndicator();
+    return position;
   }
 
   // Start or stop tram movement
@@ -648,10 +488,8 @@ class SchoolMap {
     
     if (this.tramMovement.isMoving) {
       this.tramMovement.stop();
-      console.log('🛑 Tram movement stopped');
     } else {
       this.tramMovement.start();
-      console.log('▶️ Tram movement started');
     }
   }
 
@@ -672,8 +510,6 @@ class SchoolMap {
     // Initially hide it
     this.targetIndicator.visible = false;
   }
-
-
 
   // Update target indicator position
   updateTargetIndicator() {
@@ -724,42 +560,126 @@ class SchoolMap {
   // Add new method for map rotation controls
   setupMapAdjustmentControls() {
     window.addEventListener('keydown', (event) => {
-        if (!this.mapModel) return;
+      if (!this.mapModel) return;
 
-        const moveStep = 10;
-        const rotateStep = Math.PI / 36; // 5 degrees
+      const moveStep = 10;
+      const rotateStep = Math.PI / 36; // 5 degrees
 
-        switch(event.key.toLowerCase()) {
-            case 'arrowup':
-                this.mapModel.position.z -= moveStep;
-                break;
-            case 'arrowdown':
-                this.mapModel.position.z += moveStep;
-                break;
-            case 'arrowleft':
-                this.mapModel.position.x -= moveStep;
-                break;
-            case 'arrowright':
-                this.mapModel.position.x += moveStep;
-                break;
-            case 'q':
-                this.mapModel.rotation.y += rotateStep;
-                break;
-            case 'e':
-                this.mapModel.rotation.y -= rotateStep;
-                break;
-            case '[':
-                this.mapModel.scale.multiplyScalar(0.9);
-                break;
-            case ']':
-                this.mapModel.scale.multiplyScalar(1.1);
-                break;
-        }
-
-
+      switch(event.key.toLowerCase()) {
+        case 'arrowup':
+          this.mapModel.position.z -= moveStep;
+          break;
+        case 'arrowdown':
+          this.mapModel.position.z += moveStep;
+          break;
+        case 'arrowleft':
+          this.mapModel.position.x -= moveStep;
+          break;
+        case 'arrowright':
+          this.mapModel.position.x += moveStep;
+          break;
+        case 'q':
+          this.mapModel.rotation.y += rotateStep;
+          break;
+        case 'e':
+          this.mapModel.rotation.y -= rotateStep;
+          break;
+        case '[':
+          this.mapModel.scale.multiplyScalar(0.9);
+          break;
+        case ']':
+          this.mapModel.scale.multiplyScalar(1.1);
+          break;
+      }
     });
+  }
 
+  // Initialize tram movement system
+  initializeTramMovement() {
+    if (!this.tram) {
+      console.warn('Cannot initialize tram movement: tram model not loaded');
+      return;
+    }
 
+    // Create TramMovement instance using the real tram model
+    this.tramMovement = new TramMovement(
+      this.tram,
+      null,
+      this.gpsPoints,
+      new THREE.Vector3(0, 0, 0)
+    );
+    
+    // Add current target indicator
+    this.addTargetIndicator();
+  }
+
+  loadTramFBXModel() {
+    const loader = new FBXLoader();
+    const baseUrl = import.meta.env.BASE_URL || '/';
+    const modelPath = `${baseUrl}models/Tram.fbx`;
+    loader.load(modelPath, (object) => {
+      this.tram = object;
+      // Center and scale tram model
+      const bbox = new THREE.Box3().setFromObject(this.tram);
+      const size = bbox.getSize(new THREE.Vector3());
+      const center = bbox.getCenter(new THREE.Vector3());
+      this.tram.position.sub(center); // Center the model
+
+      // Scale tram to reasonable size (12,4,8)
+      const targetSize = new THREE.Vector3(12, 4, 8);
+      const scale = new THREE.Vector3(
+        targetSize.x / size.x,
+        targetSize.y / size.y,
+        targetSize.z / size.z
+      );
+      const uniformScale = (scale.x + scale.y + scale.z) / 3;
+      this.tram.scale.set(uniformScale, uniformScale, uniformScale);
+
+      // Place at first GPS point (same as blue dot)
+      const firstPoint = this.gpsPoints[0];
+      const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
+      const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
+      const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
+      const coordScale = 100000;
+      const pos = {
+        x: (firstPoint.lat - centerLat) * coordScale,
+        y: 4,
+        z: (firstPoint.lon - centerLon) * coordScale
+      };
+      this.tram.position.set(pos.x, pos.y, pos.z);
+      // Rotate tram 180 degrees around Y axis for correct forward direction
+      this.tram.rotation.y = Math.PI;
+
+      // Remove forced yellow material: do not override child.material
+      this.tram.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+
+      this.scene.add(this.tram);
+      this.renderer.shadowMap.needsUpdate = true;
+      this.focusCameraOnTram();
+      this.initializeTramMovement();
+    }, undefined, (error) => {
+      console.error('Error loading Tram.fbx:', error);
+    });
+  }
+
+  // After tram is loaded and positioned, set camera to focus near tram
+  focusCameraOnTram() {
+    if (!this.tram) return;
+    // Offset the camera to be above and behind the tram
+    const offset = new THREE.Vector3(0, 30, 60); // Y: height, Z: behind
+    const tramPos = this.tram.position.clone();
+    const camPos = tramPos.clone().add(offset);
+    this.camera.position.copy(camPos);
+    this.camera.lookAt(tramPos);
+    if (this.controls) {
+      this.controls.target.copy(tramPos);
+      this.controls.update();
+    }
   }
 }
 
