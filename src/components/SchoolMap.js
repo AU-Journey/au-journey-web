@@ -2,16 +2,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import gsap from 'gsap';
 import TramMovement from './TramMovement.js';
 import LoadingUI from './LoadingUI';
 
 class SchoolMap {
   constructor(container) {
     this.container = container;
-    // Remove GPS conversion related properties
-    this.offset = new THREE.Vector3(-300, 0, -30);
-
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -249,13 +245,20 @@ class SchoolMap {
         this.mapModel.rotation.y = THREE.MathUtils.degToRad(165);
         this.mapModel.position.set(-300, 0, 220);
 
-        // Enable shadows
+        // --- Grass/transparent material fix ---
         this.mapModel.traverse((child) => {
-          if (child.isMesh) {
+          if (child.isMesh && child.material) {
+            // If the material is transparent (likely grass), apply fixes
+            if (child.material.transparent || (child.material.map && child.material.alphaMap)) {
+              child.material.alphaTest = 0.5;
+              child.material.depthWrite = false;
+              child.material.side = THREE.DoubleSide;
+            }
             child.receiveShadow = true;
             child.castShadow = true;
           }
         });
+        // --- End fix ---
 
         this.scene.add(this.mapModel);
 
@@ -265,9 +268,7 @@ class SchoolMap {
         this.addGPSDots();
         this.addRouteVisualization();
       },
-      (progress) => {
-        const percent = (progress.loaded / progress.total * 100).toFixed(2);
-      },
+      undefined,
       (error) => {
         console.error('Error loading map model:', error);
       }
@@ -307,7 +308,6 @@ class SchoolMap {
     };
     firstDot.position.set(firstDotPos.x, firstDotPos.y, firstDotPos.z);
     this.scene.add(firstDot);
-    //console.log('Blue dot position:', firstDotPos);
     
     // Last point (green)
     const lastDot = new THREE.Mesh(
@@ -396,23 +396,6 @@ class SchoolMap {
     this.renderer.render(this.scene, this.camera);
   }
 
-  // Shared method to position both trams at the starting point
-  positionTramAtStartPoint() {
-    const firstPoint = this.gpsPoints[0];
-    const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
-    const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
-    const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
-    const scale = 100000;
-    
-    const position = {
-      x: (firstPoint.lat - centerLat) * scale,
-      y: 2, // Ground level
-      z: (firstPoint.lon - centerLon) * scale
-    };
-    
-    return position;
-  }
-
   // Start or stop tram movement
   toggleTramMovement() {
     if (!this.tramMovement) return;
@@ -474,17 +457,6 @@ class SchoolMap {
   updateTramPositionFromLiveGPS(lat, lon) {
     if (this.tramMovement) {
       this.tramMovement.updateFromLiveGPS(lat, lon);
-    }
-  }
-
-  // Utility methods
-  getTramProgress() {
-    return this.tramMovement ? this.tramMovement.getProgress() : null;
-  }
-
-  setTramSpeed(speed) {
-    if (this.tramMovement) {
-      this.tramMovement.setSpeed(speed);
     }
   }
 
