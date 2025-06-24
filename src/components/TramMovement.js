@@ -9,7 +9,7 @@ class TramMovement {
     this.offset = offset;
     this.currentIndex = 0;
     this.isMoving = false;
-    this.baseHeight = 2; // Keep tram slightly above ground
+    this.baseHeight = -0.3; // Lowered to match initial placement
     this.currentTween = null;
     
     // Speed settings (units per second) - much slower for realistic movement
@@ -78,7 +78,8 @@ class TramMovement {
     const duration = Math.max(1.0, distance / this.tramSpeed);
 
     // Calculate rotation to face movement direction
-    const targetRotation = Math.atan2(dx, dz);
+    const modelForwardOffset = - Math.PI / 2; // Adjust if needed for your model
+    const targetRotation = Math.atan2(dx, dz) + modelForwardOffset;
 
     // Create timeline for movement
     const tl = gsap.timeline();

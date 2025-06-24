@@ -209,9 +209,8 @@ class SchoolMap {
     // Start animation loop
     this.animate();
     
-    // Enable debugging features
-    this.enableClickToLogPosition();
-    this.setupKeyboardControls();
+    
+    this.setupKeyboardControls(); // Only Space key
 
     // Handle window resize
     window.addEventListener('resize', this.onWindowResize.bind(this));
@@ -263,9 +262,6 @@ class SchoolMap {
         // Hide loading UI after map is loaded
         if (this.loadingUI) this.loadingUI.hide();
 
-        // Keep the adjustment controls for fine-tuning if needed
-        this.setupMapAdjustmentControls();
-
         this.addGPSDots();
         this.addRouteVisualization();
       },
@@ -311,7 +307,7 @@ class SchoolMap {
     };
     firstDot.position.set(firstDotPos.x, firstDotPos.y, firstDotPos.z);
     this.scene.add(firstDot);
-    console.log('Blue dot position:', firstDotPos);
+    //console.log('Blue dot position:', firstDotPos);
     
     // Last point (green)
     const lastDot = new THREE.Mesh(
@@ -373,75 +369,10 @@ class SchoolMap {
 
   setupKeyboardControls() {
     window.addEventListener('keydown', (event) => {
-      const moveStep = 10;
-      const mapRotateStep = Math.PI / 36; // 5 degrees for map
-      const tramRotateStep = Math.PI / 72; // 2.5 degrees for tram - more precise rotation
-
-      // Tram movement controls
+      // Only keep Space key for tram movement
       if (event.code === 'Space') {
         event.preventDefault();
         this.toggleTramMovement();
-        return;
-      }
-
-      // Map controls with arrow keys
-      if (this.mapModel) {
-        switch(event.key.toLowerCase()) {
-          case 'arrowup':
-            this.mapModel.position.z -= moveStep;
-            break;
-          case 'arrowdown':
-            this.mapModel.position.z += moveStep;
-            break;
-          case 'arrowleft':
-            this.mapModel.position.x -= moveStep;
-            break;
-          case 'arrowright':
-            this.mapModel.position.x += moveStep;
-            break;
-          case 'q':
-            this.mapModel.rotation.y += mapRotateStep;
-            break;
-          case 'e':
-            this.mapModel.rotation.y -= mapRotateStep;
-            break;
-          case '[':
-            this.mapModel.scale.multiplyScalar(0.9);
-            break;
-          case ']':
-            this.mapModel.scale.multiplyScalar(1.1);
-            break;
-        }
-      }
-    });
-  }
-
-  enableClickToLogPosition() {
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-
-    window.addEventListener('click', (event) => {
-      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-      raycaster.setFromCamera(mouse, this.camera);
-
-      const intersects = raycaster.intersectObjects(this.scene.children, true);
-      if (intersects.length > 0) {
-        const point = intersects[0].point;
-        
-        // Add temporary marker
-        const dot = new THREE.Mesh(
-          new THREE.SphereGeometry(2, 8, 8),
-          new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 })
-        );
-        dot.position.copy(point);
-        this.scene.add(dot);
-
-        // Remove marker after 3 seconds
-        setTimeout(() => {
-          this.scene.remove(dot);
-        }, 3000);
       }
     });
   }
@@ -557,43 +488,6 @@ class SchoolMap {
     }
   }
 
-  // Add new method for map rotation controls
-  setupMapAdjustmentControls() {
-    window.addEventListener('keydown', (event) => {
-      if (!this.mapModel) return;
-
-      const moveStep = 10;
-      const rotateStep = Math.PI / 36; // 5 degrees
-
-      switch(event.key.toLowerCase()) {
-        case 'arrowup':
-          this.mapModel.position.z -= moveStep;
-          break;
-        case 'arrowdown':
-          this.mapModel.position.z += moveStep;
-          break;
-        case 'arrowleft':
-          this.mapModel.position.x -= moveStep;
-          break;
-        case 'arrowright':
-          this.mapModel.position.x += moveStep;
-          break;
-        case 'q':
-          this.mapModel.rotation.y += rotateStep;
-          break;
-        case 'e':
-          this.mapModel.rotation.y -= rotateStep;
-          break;
-        case '[':
-          this.mapModel.scale.multiplyScalar(0.9);
-          break;
-        case ']':
-          this.mapModel.scale.multiplyScalar(1.1);
-          break;
-      }
-    });
-  }
-
   // Initialize tram movement system
   initializeTramMovement() {
     if (!this.tram) {
@@ -643,7 +537,7 @@ class SchoolMap {
       const coordScale = 100000;
       const pos = {
         x: (firstPoint.lat - centerLat) * coordScale,
-        y: 4,
+        y: -0.3, // Lowered from 4 to 2 to sit on the ground
         z: (firstPoint.lon - centerLon) * coordScale
       };
       this.tram.position.set(pos.x, pos.y, pos.z);
