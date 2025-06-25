@@ -4,6 +4,8 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import TramMovement from './TramMovement.js';
 import LoadingUI from './LoadingUI';
+import WeatherSystem from './WeatherSystem.js';
+import WeatherDisplay from './WeatherDisplay.js';
 
 class SchoolMap {
   constructor(container) {
@@ -14,6 +16,8 @@ class SchoolMap {
     this.controls = null;
     this.mapModel = null;
     this.tramMovement = null;
+    this.weatherSystem = null;
+    this.weatherDisplay = null;
 
     // Loading UI
     this.loadingUI = new LoadingUI();
@@ -180,6 +184,7 @@ class SchoolMap {
     // Lighting setup
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     this.scene.add(ambientLight);
+    this.ambientLight = ambientLight; // Store reference for weather system
 
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(50, 100, 50);
@@ -187,6 +192,13 @@ class SchoolMap {
     directionalLight.shadow.mapSize.width = 2048;
     directionalLight.shadow.mapSize.height = 2048;
     this.scene.add(directionalLight);
+    this.directionalLight = directionalLight; // Store reference for weather system
+
+    // Initialize weather system
+    this.weatherSystem = new WeatherSystem(this.scene, this.renderer);
+    
+    // Initialize weather display
+    this.weatherDisplay = new WeatherDisplay();
 
     // Controls setup
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -388,6 +400,17 @@ class SchoolMap {
     
     if (this.controls) {
       this.controls.update();
+    }
+    
+    // Update weather system
+    if (this.weatherSystem) {
+      this.weatherSystem.update(performance.now());
+      
+      // Update weather display
+      if (this.weatherDisplay) {
+        const weatherInfo = this.weatherSystem.getWeatherInfo();
+        this.weatherDisplay.update(weatherInfo);
+      }
     }
     
     // Update target indicator
