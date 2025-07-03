@@ -6,6 +6,8 @@ import TramMovement from './TramMovement.js';
 import LoadingUI from './LoadingUI';
 import WeatherSystem from './WeatherSystem.js';
 import WeatherDisplay from './WeatherDisplay.js';
+import TramTracker from './TramTracker.js';
+import BackendAPI from '../api/BackendAPI.js';
 
 class SchoolMap {
   constructor(container) {
@@ -18,6 +20,8 @@ class SchoolMap {
     this.tramMovement = null;
     this.weatherSystem = null;
     this.weatherDisplay = null;
+    this.tramTracker = null;
+    this.backendAPI = null;
 
     // Loading UI
     this.loadingUI = new LoadingUI();
@@ -199,6 +203,14 @@ class SchoolMap {
     
     // Initialize weather display
     this.weatherDisplay = new WeatherDisplay();
+    this.weatherDisplay.show();
+    
+    // Initialize tram tracking system (for iOS API fallback)
+    this.tramTracker = new TramTracker();
+    
+    // Initialize Backend API for iOS integration
+    this.backendAPI = new BackendAPI();
+    this.backendAPI.startAPI();
 
     // Controls setup
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -413,6 +425,9 @@ class SchoolMap {
       }
     }
     
+    // Update tram tracking if tram is moving
+    this.updateTramTracking();
+    
     // Update target indicator
     this.updateTargetIndicator();
     
@@ -480,6 +495,16 @@ class SchoolMap {
   updateTramPositionFromLiveGPS(lat, lon) {
     if (this.tramMovement) {
       this.tramMovement.updateFromLiveGPS(lat, lon);
+    }
+    
+    // Update backend API with new position
+    if (this.backendAPI) {
+      this.backendAPI.updateTramPosition(lat, lon);
+    }
+    
+    // Update local tracking system as fallback
+    if (this.tramTracker) {
+      this.tramTracker.updatePosition(lat, lon);
     }
   }
 
@@ -568,6 +593,35 @@ class SchoolMap {
     if (this.controls) {
       this.controls.target.copy(tramPos);
       this.controls.update();
+    }
+  }
+  
+  // Update tram tracking system continuously for iOS API
+  updateTramTracking() {
+    if (!this.tramMovement || !this.tramTracker || !this.tramMovement.tram) return;
+    
+    // Get current tram progress
+    const progress = this.tramMovement.getProgress();
+    if (!progress || !progress.isMoving) return;
+    
+    // Get current GPS point based on tram's current index
+    const currentGPS = this.gpsPoints[progress.currentIndex];
+    if (currentGPS) {
+      // Update tracker with current position (for iOS API only)
+      this.tramTracker.updatePosition(currentGPS.lat, currentGPS.lon);
+    }
+  }
+  
+  // Get current tram status for API (fallback to local tracker)
+  getTramStatusAPI() {
+    if (!this.tramTracker) return null;
+    return this.tramTracker.getStatusForAPI();
+  }
+  
+  // Reset tram tracking
+  resetTramTracking() {
+    if (this.tramTracker) {
+      this.tramTracker.reset();
     }
   }
 }
