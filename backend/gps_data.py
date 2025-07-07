@@ -1,3 +1,7 @@
+"""
+GPS Data and Building Locations for AU Tram Tracking
+"""
+
 # GPS route points for the AU University tram route
 GPS_POINTS = [
     {"lat": 13.612263, "lon": 100.836828},
@@ -138,35 +142,39 @@ GPS_POINTS = [
     {"lat": 13.612527, "lon": 100.840321}
 ]
 
-# Building checkpoints (AU University campus route)
+# Building/Stop locations with optimized detection radius
 BUILDINGS = [
     {
         "id": "msm_building",
         "name": "MSM Building",
-        "lat": 13.612263,
-        "lon": 100.836828,
-        "radius": 0.0003  # ~30 meters detection radius
+        "displayName": "MSM Building",
+        "lat": 13.612565,
+        "lon": 100.836516,
+        "radius": 0.0005  # Approximately 55 meters - optimized for reliable detection
     },
     {
-        "id": "it_building",
+        "id": "it_building", 
         "name": "IT Building",
-        "lat": 13.613051,
-        "lon": 100.834310,
-        "radius": 0.0003
+        "displayName": "IT Building",
+        "lat": 13.612177,
+        "lon": 100.836425,
+        "radius": 0.0005  # Approximately 55 meters - optimized for reliable detection
     },
     {
         "id": "au_mall",
         "name": "AU Mall",
-        "lat": 13.613202,
-        "lon": 100.833545,
-        "radius": 0.0003
+        "displayName": "AU Mall",
+        "lat": 13.612764,
+        "lon": 100.833440,
+        "radius": 0.0005  # Approximately 55 meters - optimized for reliable detection
     },
     {
         "id": "queen_of_sheba",
         "name": "Queen of Sheba",
-        "lat": 13.614444,
-        "lon": 100.831560,
-        "radius": 0.0003
+        "displayName": "Queen of Sheba",
+        "lat": 13.614219,
+        "lon": 100.832132,
+        "radius": 0.0005  # Approximately 55 meters - optimized for reliable detection
     }
 ]
 

@@ -7,6 +7,7 @@ import LoadingUI from './LoadingUI';
 import WeatherSystem from './WeatherSystem.js';
 import WeatherDisplay from './WeatherDisplay.js';
 import TramTracker from './TramTracker.js';
+import TramDebugUI from './TramDebugUI.js';
 import BackendAPI from '../api/BackendAPI.js';
 
 class SchoolMap {
@@ -21,7 +22,12 @@ class SchoolMap {
     this.weatherSystem = null;
     this.weatherDisplay = null;
     this.tramTracker = null;
+    this.tramDebugUI = null;
     this.backendAPI = null;
+    
+    // Debug UI throttling
+    this.lastDebugUpdate = 0;
+    this.debugUpdateInterval = 1000; // 1 second
 
     // Loading UI
     this.loadingUI = new LoadingUI();
@@ -205,8 +211,19 @@ class SchoolMap {
     this.weatherDisplay = new WeatherDisplay();
     this.weatherDisplay.show();
     
-    // Initialize tram tracking system (for iOS API fallback)
+    // Initialize enhanced tram tracking system
     this.tramTracker = new TramTracker();
+    
+    // Subscribe to status changes for better visual feedback
+    this.tramTracker.onStatusChange((statusData) => {
+      console.log('🚊 Tram Status Update:', statusData.newStatus);
+      if (statusData.nextStop) {
+        console.log(`📍 Next Stop: ${statusData.nextStop.displayName}`);
+      }
+    });
+    
+    // Initialize debug UI for development
+    this.tramDebugUI = new TramDebugUI();
     
     // Initialize Backend API for iOS integration
     this.backendAPI = new BackendAPI();
@@ -219,6 +236,9 @@ class SchoolMap {
     this.controls.maxPolarAngle = Math.PI / 2.1; // Prevent camera from going below ground
     this.controls.minDistance = 20; // Prevent zooming too close
     this.controls.maxDistance = 200; // Prevent zooming too far
+
+    // Setup click handler for coordinate detection
+    this.setupClickHandler();
 
     // Load models
     this.loadMapModel();
@@ -291,6 +311,7 @@ class SchoolMap {
 
         this.addGPSDots();
         this.addRouteVisualization();
+        this.addTramStopIndicators();
       },
       undefined,
       (error) => {
@@ -390,6 +411,68 @@ class SchoolMap {
     line.name = 'route-line';
     this.scene.add(line);
   }
+  
+  // Add visual indicators for tram stops
+  addTramStopIndicators() {
+    const stops = this.tramTracker.getBuildings();
+    
+    // Use same positioning logic as GPS dots
+    const firstPoint = this.gpsPoints[0];
+    const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
+    const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
+    const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
+    const scale = 100000;
+    
+    stops.forEach((stop, index) => {
+      // Create stop indicator with distinctive appearance
+      const geometry = new THREE.CylinderGeometry(4, 4, 8, 8);
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xffd700, // Gold color for stops
+        transparent: true,
+        opacity: 0.9
+      });
+      
+      const stopIndicator = new THREE.Mesh(geometry, material);
+      
+      // Position using same coordinate system
+      const position = {
+        x: (stop.lat - centerLat) * scale,
+        y: 6, // Higher than GPS dots
+        z: (stop.lon - centerLon) * scale
+      };
+      
+      stopIndicator.position.set(position.x, position.y, position.z);
+      stopIndicator.name = `stop-${stop.id}`;
+      this.scene.add(stopIndicator);
+      
+      // Add stop label
+      this.addStopLabel(stop, position);
+      
+      console.log(`🚏 Added tram stop: ${stop.displayName} at (${position.x.toFixed(1)}, ${position.z.toFixed(1)})`);
+    });
+  }
+  
+  // Add text labels for tram stops (simplified version)
+  addStopLabel(stop, position) {
+    // Create a simple text representation using a colored sphere
+    const labelGeometry = new THREE.SphereGeometry(1.5, 8, 8);
+    const labelMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff6600, // Orange for labels
+      transparent: true,
+      opacity: 0.8
+    });
+    
+    const label = new THREE.Mesh(labelGeometry, labelMaterial);
+    label.position.set(position.x, position.y + 5, position.z);
+    label.name = `label-${stop.id}`;
+    this.scene.add(label);
+    
+    // Store stop info for potential interaction
+    label.userData = {
+      stopName: stop.displayName,
+      stopId: stop.id
+    };
+  }
 
   setupKeyboardControls() {
     window.addEventListener('keydown', (event) => {
@@ -397,6 +480,14 @@ class SchoolMap {
       if (event.code === 'Space') {
         event.preventDefault();
         this.toggleTramMovement();
+      }
+      
+      // Toggle debug UI with 'D' key
+      if (event.code === 'KeyD') {
+        event.preventDefault();
+        if (this.tramDebugUI) {
+          this.tramDebugUI.toggle();
+        }
       }
     });
   }
@@ -602,13 +693,60 @@ class SchoolMap {
     
     // Get current tram progress
     const progress = this.tramMovement.getProgress();
-    if (!progress || !progress.isMoving) return;
+    if (!progress) return;
     
     // Get current GPS point based on tram's current index
     const currentGPS = this.gpsPoints[progress.currentIndex];
     if (currentGPS) {
-      // Update tracker with current position (for iOS API only)
+      // Update local tracker
       this.tramTracker.updatePosition(currentGPS.lat, currentGPS.lon);
+      
+      // Send position to backend API for building detection (only when moving)
+      if (progress.isMoving && this.backendAPI) {
+        this.backendAPI.updateTramPosition(currentGPS.lat, currentGPS.lon);
+      }
+      
+      // Update debug UI
+      this.updateDebugUI(currentGPS, progress);
+    }
+  }
+  
+  // Update debug UI with current status
+  async updateDebugUI(currentGPS, progress) {
+    if (!this.tramDebugUI) return;
+    
+    // Throttle debug UI updates
+    const currentTime = Date.now();
+    if (currentTime - this.lastDebugUpdate < this.debugUpdateInterval) {
+      return;
+    }
+    this.lastDebugUpdate = currentTime;
+    
+    try {
+      // Get backend status
+      const backendStatus = await this.backendAPI.getTramStatus();
+      
+      // Prepare debug data
+      const debugData = {
+        frontendStatus: progress.isMoving ? 'Running' : 'Stopped',
+        position: currentGPS,
+        backendStatus: backendStatus?.data || null
+      };
+      
+      // Update debug UI
+      this.tramDebugUI.updateStatus(debugData);
+      
+      // Console logging for additional debugging
+      if (progress.isMoving) {
+        console.log('🚊 Tram Position Update:', {
+          gps: `${currentGPS.lat.toFixed(6)}, ${currentGPS.lon.toFixed(6)}`,
+          progress: `${progress.currentIndex}/${progress.totalPoints}`,
+          backendStatus: backendStatus?.data?.currentStatus || 'Unknown',
+          headingTo: backendStatus?.data?.headingTo || 'Not Set'
+        });
+      }
+    } catch (error) {
+      console.warn('⚠️ Debug UI update failed:', error);
     }
   }
   
@@ -623,6 +761,88 @@ class SchoolMap {
     if (this.tramTracker) {
       this.tramTracker.reset();
     }
+  }
+
+  // Setup click handler for coordinate detection
+  setupClickHandler() {
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    
+    this.renderer.domElement.addEventListener('click', (event) => {
+      // Prevent triggering when dragging camera
+      if (this.controls && this.controls.getDistance() !== this.controls.getDistance()) return;
+      
+      // Calculate mouse position in normalized device coordinates (-1 to +1)
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      // Cast ray from camera through mouse position
+      raycaster.setFromCamera(mouse, this.camera);
+      
+      // Find intersections with the map model
+      const intersects = raycaster.intersectObjects(this.scene.children, true);
+      
+      if (intersects.length > 0) {
+        const intersect = intersects[0];
+        const point = intersect.point;
+        
+        // Convert 3D coordinates back to GPS coordinates
+        const gpsCoords = this.threeDToGPS(point.x, point.z);
+        
+        console.log('🗺️ Click Position:');
+        console.log(`   3D Coordinates: x=${point.x.toFixed(2)}, y=${point.y.toFixed(2)}, z=${point.z.toFixed(2)}`);
+        console.log(`   GPS Coordinates: lat=${gpsCoords.lat.toFixed(6)}, lon=${gpsCoords.lon.toFixed(6)}`);
+        console.log(`   Copy for tram stop: { lat: ${gpsCoords.lat.toFixed(6)}, lon: ${gpsCoords.lon.toFixed(6)} }`);
+        
+        // Add a temporary marker at the clicked position
+        this.addTemporaryMarker(point);
+      }
+    });
+    
+    console.log('🖱️ Click handler enabled - click on map to get coordinates for tram stops');
+  }
+  
+  // Convert 3D coordinates back to GPS coordinates
+  threeDToGPS(x, z) {
+    // Use same calculation parameters as the GPS to 3D conversion
+    const firstPoint = this.gpsPoints[0];
+    const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
+    const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
+    const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
+    const scale = 100000;
+    
+    return {
+      lat: (x / scale) + centerLat,
+      lon: (z / scale) + centerLon
+    };
+  }
+  
+  // Add temporary marker to show clicked position
+  addTemporaryMarker(position) {
+    // Remove previous temporary marker
+    const existingMarker = this.scene.getObjectByName('temp-marker');
+    if (existingMarker) {
+      this.scene.remove(existingMarker);
+    }
+    
+    // Create new marker
+    const geometry = new THREE.SphereGeometry(3, 8, 8);
+    const material = new THREE.MeshBasicMaterial({ 
+      color: 0xff00ff, 
+      transparent: true, 
+      opacity: 0.8 
+    });
+    
+    const marker = new THREE.Mesh(geometry, material);
+    marker.position.set(position.x, position.y + 5, position.z);
+    marker.name = 'temp-marker';
+    this.scene.add(marker);
+    
+    // Remove marker after 5 seconds
+    setTimeout(() => {
+      this.scene.remove(marker);
+    }, 5000);
   }
 }
 

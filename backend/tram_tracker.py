@@ -1,3 +1,6 @@
+"""
+Tram Tracking Logic for AU University Tram System
+"""
 import time
 import math
 import threading
@@ -6,304 +9,231 @@ from gps_data import GPS_POINTS, BUILDINGS
 
 class TramTracker:
     def __init__(self):
-        # Tram tracking state
-        self.current_status = 'Stopped'
-        self.current_location = None
-        self.last_location = None
-        self.is_moving = False
-        self.current_speed = 0
-        self.direction = None
-        self.next_building = None
+        self.current_position = None
+        self.last_update_time = None
+        self.last_movement_time = time.time()  # Track when tram last moved
+        self.location_history = []
+        self.max_history = 10
+        
+        # Route tracking - simplified for continuous loop
         self.last_passed_building = None
+        self.next_building = None
+        self.has_left_building_radius = True  # Track if tram has left the last building's radius
         
         # Movement detection settings
         self.movement_threshold = 0.00001  # GPS coordinate difference to detect movement
-        self.speed_calculation_interval = 2000  # Calculate speed every 2 seconds
-        self.stopped_duration = 5000  # Consider stopped after 5 seconds of no movement
+        self.stopped_duration = 30 * 60  # 30 minutes in seconds
         
-        # Tracking history
-        self.location_history = []
-        self.max_history_length = 10
-        self.last_update_time = time.time() * 1000
-        
-        # Building checkpoints
-        self.buildings = BUILDINGS
-        
-        # Define the route sequence (order matters for direction prediction)
-        self.route_sequence = [
-            'msm_building',
-            'it_building', 
-            'au_mall',
-            'queen_of_sheba'
-        ]
-        
-        # Simulation state
-        self.is_simulating = False
+        # Simulation
         self.simulation_thread = None
+        self.simulation_running = False
         self.simulation_index = 0
-        self.simulation_speed = 1.0
         
-        print(f'🚋 TramTracker initialized with {len(self.buildings)} building checkpoints')
+        # Debug logging throttle
+        self.last_debug_log_time = 0
+        self.debug_log_interval = 5  # seconds
+        
+        # Initialize with MSM as starting point
+        self.initialize_route()
+        
+    def initialize_route(self):
+        """Initialize route with MSM as starting point"""
+        self.last_passed_building = None
+        self.next_building = BUILDINGS[0]  # MSM Building
+        self.has_left_building_radius = True
+        
+    def get_next_building(self, current_building_id):
+        """Get the next building in continuous loop: MSM → IT → AU Mall → Queen of Sheba → MSM"""
+        # Define the continuous loop sequence
+        loop_sequence = ["msm_building", "it_building", "au_mall", "queen_of_sheba"]
+        
+        if not current_building_id:
+            return BUILDINGS[0]  # Start with MSM
+            
+        try:
+            # Find current building in the sequence
+            current_index = next(i for i, building_id in enumerate(loop_sequence) if building_id == current_building_id)
+            # Get next building in loop (wraps around to MSM after Queen of Sheba)
+            next_index = (current_index + 1) % len(loop_sequence)
+            next_building_id = loop_sequence[next_index]
+            
+            # Find the building object
+            return next(b for b in BUILDINGS if b["id"] == next_building_id)
+            
+        except StopIteration:
+            return BUILDINGS[0]  # Default to MSM if not found
     
-    def update_position(self, lat, lon):
-        """Main method to update tram position and calculate status"""
-        current_time = time.time() * 1000
-        new_location = {"lat": lat, "lon": lon, "timestamp": current_time}
-        
-        # Store previous location
-        self.last_location = self.current_location
-        self.current_location = new_location
-        
-        # Add to history
-        self.add_to_history(new_location)
-        
-        # Calculate movement status
-        self.calculate_movement_status()
-        
-        # Detect nearby buildings
-        self.detect_nearby_buildings()
-        
-        # Predict direction and next building
-        self.predict_direction()
-        
-        # Update overall status
-        self.update_status()
-        
-        self.last_update_time = current_time
-        
-        # Return current tracking info
-        return self.get_tracking_info()
-    
-    def add_to_history(self, location):
-        """Add location to tracking history"""
-        self.location_history.append(location)
-        if len(self.location_history) > self.max_history_length:
-            self.location_history.pop(0)
-    
-    def calculate_movement_status(self):
-        """Calculate if tram is moving and current speed"""
-        if not self.last_location or not self.current_location:
-            self.is_moving = False
-            self.current_speed = 0
-            return
-        
-        # Calculate distance moved
+    def detect_movement(self, lat, lon):
+        """Detect if the tram has moved significantly"""
+        if not self.current_position:
+            return True  # First position update counts as movement
+            
+        # Calculate distance from last position
         distance = self.calculate_distance(
-            self.last_location["lat"], self.last_location["lon"],
-            self.current_location["lat"], self.current_location["lon"]
+            self.current_position["lat"], self.current_position["lon"],
+            lat, lon
         )
         
-        # Calculate time difference in seconds
-        time_diff = (self.current_location["timestamp"] - self.last_location["timestamp"]) / 1000
+        # Convert to meters (approximate)
+        distance_meters = distance * 111000
         
-        # Calculate speed (m/s)
-        self.current_speed = (distance / time_diff) if time_diff > 0 else 0
-        
-        # Determine if moving based on threshold
-        self.is_moving = distance > self.movement_threshold and self.current_speed > 0.1  # 0.1 m/s threshold
-    
-    def detect_nearby_buildings(self):
-        """Detect nearby buildings based on current position"""
-        if not self.current_location:
-            return
-        
-        nearby_buildings = []
-        
-        for building in self.buildings:
-            distance = self.calculate_distance(
-                self.current_location["lat"], self.current_location["lon"],
-                building["lat"], building["lon"]
-            )
+        # If moved more than ~3 meters, consider it movement (more sensitive)
+        if distance_meters > 3:
+            self.last_movement_time = time.time()
+            return True
             
-            # Convert radius to meters for comparison
-            radius_in_meters = building["radius"] * 111000  # Rough conversion
-            
-            if distance <= radius_in_meters:
-                nearby_buildings.append({
-                    **building,
-                    "distance": distance
-                })
-        
-        # Sort by closest distance
-        nearby_buildings.sort(key=lambda x: x["distance"])
-        
-        # Update last passed building if we're near one
-        if nearby_buildings and not self.is_moving:
-            self.last_passed_building = nearby_buildings[0]
+        return False
     
-    def predict_direction(self):
-        """Predict direction and next building based on movement history"""
-        if not self.last_passed_building or len(self.location_history) < 3:
-            self.next_building = None
-            self.direction = None
-            return
+    def update_position(self, lat, lon):
+        """Update tram position and detect buildings"""
+        current_time = time.time()
         
-        # Find current building in route sequence
-        current_building_index = -1
-        for i, building_id in enumerate(self.route_sequence):
-            if building_id == self.last_passed_building["id"]:
-                current_building_index = i
-                break
+        # Detect movement
+        has_moved = self.detect_movement(lat, lon)
         
-        if current_building_index == -1:
-            self.next_building = None
-            self.direction = None
-            return
-        
-        # Calculate movement vector from recent history
-        recent_history = self.location_history[-3:]
-        if len(recent_history) < 2:
-            return
-        
-        old_pos = recent_history[0]
-        new_pos = recent_history[-1]
-        
-        movement_vector = {
-            "lat": new_pos["lat"] - old_pos["lat"],
-            "lon": new_pos["lon"] - old_pos["lon"]
+        # Update current position
+        self.current_position = {
+            "lat": lat,
+            "lon": lon,
+            "timestamp": current_time
         }
         
-        # Check next building in sequence
-        next_building_index = (current_building_index + 1) % len(self.route_sequence)
-        next_building_id = self.route_sequence[next_building_index]
-        next_building = next(b for b in self.buildings if b["id"] == next_building_id)
+        # Debug logging for position updates
+        if has_moved:
+            print(f"📍 Tram position updated: {lat:.6f}, {lon:.6f}")
         
-        if next_building:
-            # Calculate vector to next building
-            to_building_vector = {
-                "lat": next_building["lat"] - self.current_location["lat"],
-                "lon": next_building["lon"] - self.current_location["lon"]
-            }
+        # Add to history
+        self.location_history.append(self.current_position.copy())
+        if len(self.location_history) > self.max_history:
+            self.location_history.pop(0)
             
-            # Calculate dot product to determine if moving towards building
-            dot_product = (movement_vector["lat"] * to_building_vector["lat"] + 
-                          movement_vector["lon"] * to_building_vector["lon"])
-            
-            if dot_product > 0 and self.is_moving:
-                self.next_building = next_building
-                self.direction = 'towards'
-            else:
-                # Check previous building in sequence (might be going backwards)
-                prev_building_index = (current_building_index - 1 + len(self.route_sequence)) % len(self.route_sequence)
-                prev_building_id = self.route_sequence[prev_building_index]
-                prev_building = next(b for b in self.buildings if b["id"] == prev_building_id)
-                
-                if prev_building:
-                    to_prev_building_vector = {
-                        "lat": prev_building["lat"] - self.current_location["lat"],
-                        "lon": prev_building["lon"] - self.current_location["lon"]
-                    }
-                    
-                    prev_dot_product = (movement_vector["lat"] * to_prev_building_vector["lat"] + 
-                                       movement_vector["lon"] * to_prev_building_vector["lon"])
-                    
-                    if prev_dot_product > 0 and self.is_moving:
-                        self.next_building = prev_building
-                        self.direction = 'towards'
-    
-    def update_status(self):
-        """Update overall tram status"""
-        if not self.is_moving:
-            # Check if we've been stopped for a while
-            time_since_last_movement = time.time() * 1000 - self.last_update_time
-            if time_since_last_movement > self.stopped_duration:
-                self.current_status = 'Stopped'
-            else:
-                self.current_status = 'Slowing Down'
-        elif self.next_building and self.direction == 'towards':
-            self.current_status = f'Heading to {self.next_building["name"]}'
+        # Check for nearby buildings
+        detected_building = self.detect_building(lat, lon)
+        
+        if detected_building:
+            # We're inside a building's radius
+            if not self.last_passed_building or detected_building["id"] != self.last_passed_building["id"]:
+                # New building detected
+                print(f"🏢 Tram entered building: {detected_building['displayName']}")
+                self.last_passed_building = detected_building
+                self.next_building = self.get_next_building(detected_building["id"])
+                self.has_left_building_radius = False
+                print(f"🎯 Next destination updated: {self.next_building['displayName']}")
         else:
-            self.current_status = 'Running'
+            # We're outside any building radius
+            if self.last_passed_building and not self.has_left_building_radius:
+                # We just left a building's radius
+                print(f"🚪 Tram left building: {self.last_passed_building['displayName']}")
+                self.has_left_building_radius = True
+            
+        self.last_update_time = current_time
+        
+        return self.get_tracking_info()
+    
+    def detect_building(self, lat, lon):
+        """Detect if tram is near a building"""
+        current_time = time.time()
+        should_log = (current_time - self.last_debug_log_time) >= self.debug_log_interval
+        
+        for building in BUILDINGS:
+            distance = self.calculate_distance(lat, lon, building["lat"], building["lon"])
+            # Debug: print distance to each building (throttled)
+            if should_log:
+                distance_meters = distance * 111000
+                print(f"🏢 Distance to {building['displayName']}: {distance_meters:.1f}m (radius: {building['radius']*111000:.1f}m)")
+            if distance <= building["radius"]:
+                return building
+        
+        if should_log:
+            self.last_debug_log_time = current_time
+        
+        return None
     
     def calculate_distance(self, lat1, lon1, lat2, lon2):
-        """Calculate distance between two GPS coordinates in meters"""
-        R = 6371000  # Earth's radius in meters
-        d_lat = self.degrees_to_radians(lat2 - lat1)
-        d_lon = self.degrees_to_radians(lon2 - lon1)
-        a = (math.sin(d_lat/2) * math.sin(d_lat/2) +
-             math.cos(self.degrees_to_radians(lat1)) * math.cos(self.degrees_to_radians(lat2)) *
-             math.sin(d_lon/2) * math.sin(d_lon/2))
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        return R * c
+        """Calculate distance between two GPS coordinates in degrees"""
+        return math.sqrt((lat1 - lat2) ** 2 + (lon1 - lon2) ** 2)
     
-    def degrees_to_radians(self, degrees):
-        """Convert degrees to radians"""
-        return degrees * (math.pi / 180)
+    def is_tram_stopped(self):
+        """Check if tram has been stopped for 30+ minutes"""
+        current_time = time.time()
+        time_since_movement = current_time - self.last_movement_time
+        return time_since_movement >= self.stopped_duration
     
-    def get_tracking_info(self):
-        """Get comprehensive tracking information"""
-        return {
-            # Basic status
-            "status": self.current_status,
-            "isMoving": self.is_moving,
-            "speed": round(self.current_speed * 3.6, 2),  # Convert to km/h with 2 decimals
+    def get_status(self):
+        """Get current tram status"""
+        # Check if stopped for 30+ minutes
+        if self.is_tram_stopped():
+            status = "Stopped"
+        else:
+            status = "Running"
+        
+        # Always show "Heading to" next building when tram is running (continuous loop)
+        if self.next_building and not self.is_tram_stopped():
+            heading_to = f"Heading to {self.next_building['displayName']}"
+        else:
+            heading_to = None
             
-            # Location info
-            "currentLocation": self.current_location,
+        return {
+            "status": status,
+            "headingTo": heading_to,
             "lastPassedBuilding": self.last_passed_building,
             "nextBuilding": self.next_building,
-            "direction": self.direction,
-            
-            # Additional metadata
+            "currentLocation": self.current_position,
             "timestamp": int(time.time() * 1000),
-            "locationHistoryLength": len(self.location_history)
+            "timeSinceMovement": int(time.time() - self.last_movement_time)
+        }
+    
+    def get_tracking_info(self):
+        """Get detailed tracking information"""
+        status_info = self.get_status()
+        
+        return {
+            "status": status_info["status"],
+            "headingTo": status_info["headingTo"],
+            "lastPassedBuilding": status_info["lastPassedBuilding"],
+            "nextBuilding": status_info["nextBuilding"],
+            "currentLocation": status_info["currentLocation"],
+            "locationHistoryLength": len(self.location_history),
+            "timestamp": status_info["timestamp"],
+            "timeSinceMovement": status_info["timeSinceMovement"]
         }
     
     def get_status_for_api(self):
-        """Get status formatted for API/iOS integration"""
-        info = self.get_tracking_info()
+        """Get status formatted for iOS API"""
+        status = self.get_status()
         
-        # Determine currentStatus for iOS
-        current_status = 'Stopped'
-        if info["isMoving"]:
-            current_status = 'Running'
-        
-        # Determine headingTo for iOS
-        heading_to = None
-        if info["nextBuilding"]:
-            heading_to = f'Heading to {info["nextBuilding"]["name"]}'
-        elif info["isMoving"]:
-            # If moving but no specific building detected, show general direction
-            heading_to = 'Moving along route'
+        # Format heading text - always "Heading to" in continuous loop
+        heading_text = None
+        if status["headingTo"]:
+            heading_text = f"Heading to {status['nextBuilding']['displayName']}"
         
         return {
-            "tram_id": "tram_01",  # You can make this dynamic
-            "currentStatus": current_status,
-            "headingTo": heading_to,
-            # Additional data for debugging/advanced features
-            "speed_kmh": info["speed"],
+            "tram_id": "tram_01",
+            "currentStatus": status["status"],
+            "headingTo": heading_text,
             "location": {
-                "lat": info["currentLocation"]["lat"] if info["currentLocation"] else None,
-                "lng": info["currentLocation"]["lon"] if info["currentLocation"] else None
+                "lat": self.current_position["lat"] if self.current_position else None,
+                "lng": self.current_position["lon"] if self.current_position else None
             },
-            "last_building": info["lastPassedBuilding"]["name"] if info["lastPassedBuilding"] else None,
-            "timestamp": info["timestamp"]
+            "last_building": status["lastPassedBuilding"]["name"] if status["lastPassedBuilding"] else None,
+            "timestamp": status["timestamp"],
+            "time_since_movement_seconds": status["timeSinceMovement"]
         }
     
-    def reset(self):
-        """Reset tracking state"""
-        self.current_status = 'Stopped'
-        self.current_location = None
-        self.last_location = None
-        self.is_moving = False
-        self.current_speed = 0
-        self.direction = None
-        self.next_building = None
-        self.last_passed_building = None
-        self.location_history = []
-        self.last_update_time = time.time() * 1000
-    
-    # Simulation methods for testing
     def start_simulation(self, speed_multiplier=1.0):
-        """Start simulating tram movement for testing"""
-        if self.is_simulating:
+        """Start tram simulation along the route"""
+        if self.simulation_running:
             return {"message": "Simulation already running"}
+            
+        self.simulation_running = True
         
-        self.is_simulating = True
-        self.simulation_speed = speed_multiplier
-        self.simulation_index = 0
+        # Reset movement time when starting simulation
+        self.last_movement_time = time.time()
         
-        self.simulation_thread = threading.Thread(target=self._run_simulation)
+        self.simulation_thread = threading.Thread(
+            target=self._simulation_loop,
+            args=(speed_multiplier,)
+        )
         self.simulation_thread.daemon = True
         self.simulation_thread.start()
         
@@ -314,25 +244,34 @@ class TramTracker:
         }
     
     def stop_simulation(self):
-        """Stop the simulation"""
-        self.is_simulating = False
+        """Stop tram simulation"""
+        self.simulation_running = False
         if self.simulation_thread:
             self.simulation_thread.join(timeout=1)
+        return {"message": "Simulation stopped"}
     
-    def _run_simulation(self):
-        """Internal method to run the simulation"""
-        while self.is_simulating and self.simulation_index < len(GPS_POINTS):
-            point = GPS_POINTS[self.simulation_index]
-            self.update_position(point["lat"], point["lon"])
+    def _simulation_loop(self, speed_multiplier):
+        """Simulation loop that moves tram along GPS points"""
+        while self.simulation_running:
+            # Get current GPS point
+            gps_point = GPS_POINTS[self.simulation_index]
             
-            # Delay based on speed multiplier
-            delay = max(0.1, 2.0 / self.simulation_speed)  # Base delay of 2 seconds
-            time.sleep(delay)
+            # Update position
+            self.update_position(gps_point["lat"], gps_point["lon"])
             
-            self.simulation_index += 1
+            # Move to next point
+            self.simulation_index = (self.simulation_index + 1) % len(GPS_POINTS)
             
-            # Loop back to start
-            if self.simulation_index >= len(GPS_POINTS):
-                self.simulation_index = 0
-        
-        self.is_simulating = False 
+            # Sleep based on speed multiplier
+            time.sleep(0.5 / speed_multiplier)
+    
+    def reset(self):
+        """Reset tram tracker to initial state"""
+        self.current_position = None
+        self.last_update_time = None
+        self.last_movement_time = time.time()
+        self.location_history = []
+        self.has_left_building_radius = True
+        self.initialize_route()
+        self.stop_simulation()
+        self.simulation_index = 0 

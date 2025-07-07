@@ -1,6 +1,6 @@
 # AU Tram Tracking Backend API
 
-A Flask-based REST API for tracking tram movement at AU University campus.
+A Flask-based REST API for tracking tram movement at AU University Suvarnabhumi campus.
 
 ## Features
 

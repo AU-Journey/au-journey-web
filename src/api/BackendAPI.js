@@ -89,7 +89,7 @@ class BackendAPI {
   hasStatusChanged(newStatus) {
     if (!this.lastStatusUpdate) return true;
     
-    const keys = ['currentStatus', 'headingTo', 'last_building'];
+    const keys = ['currentStatus', 'headingTo', 'current_stop', 'next_stop', 'is_moving'];
     return keys.some(key => this.lastStatusUpdate[key] !== newStatus[key]);
   }
   
@@ -115,6 +115,18 @@ class BackendAPI {
         error: 'Failed to connect to backend',
         timestamp: Date.now()
       };
+    }
+  }
+  
+  // Get tram status for debug UI
+  async getTramStatus() {
+    try {
+      const response = await fetch(`${this.baseURL}/tram/status`);
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error('❌ Failed to get tram status:', error);
+      return { success: false, error: error.message };
     }
   }
   
