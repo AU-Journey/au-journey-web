@@ -10,7 +10,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for frontend communication
+
+# Secure CORS configuration - restrict to specific origins and methods
+# Replace '*' with your actual frontend domain in production
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": False,
+        "max_age": 600  # Cache preflight requests for 10 minutes
+    }
+})
 
 # Import our tram tracking logic
 from tram_tracker import TramTracker
