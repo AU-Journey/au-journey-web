@@ -1,9 +1,9 @@
 // TramMovement.js
-import * as THREE from 'three';
+import { Vector3 } from 'three';
 import gsap from 'gsap';
 
 class TramMovement {
-  constructor(tram, gpsTo3DCoords, gpsPoints, offset = new THREE.Vector3(0, 0, 0)) {
+  constructor(tram, gpsTo3DCoords, gpsPoints, offset = new Vector3(0, 0, 0)) {
     this.tram = tram;
     this.gpsPoints = gpsPoints;
     this.offset = offset;
