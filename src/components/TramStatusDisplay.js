@@ -113,7 +113,7 @@ class TramStatusDisplay {
         Status: <span style="color: #4CAF50;">${statusData.currentStatus || 'Unknown'}</span>
       </div>
       <div style="margin-bottom: 3px;">
-        ${statusData.headingTo ? `🎯 ${statusData.headingTo}` : '⏸️ Not moving'}
+        ${statusData.is_moving ? '🚊 Moving' : '⏸️ Not moving'}
       </div>
       <div style="font-size: 12px; color: #cccccc;">
         Speed: ${statusData.speed_kmh || 0} km/h
@@ -130,9 +130,6 @@ class TramStatusDisplay {
         if (statusData.current_stop === stop.name) {
           statusIcon = '🔵'; // Current stop
           statusColor = '#4CAF50';
-        } else if (statusData.next_stop === stop.name) {
-          statusIcon = '🟡'; // Next stop
-          statusColor = '#FFC107';
         }
         
         stopsHTML += `

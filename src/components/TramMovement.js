@@ -23,7 +23,7 @@ class TramMovement {
     this.centerLon = (firstPoint.lon + lastPoint.lon) / 2;
     this.scale = 100000;
 
-    console.log('✅ TramMovement initialized with', gpsPoints.length, 'GPS points');
+
   }
 
   // Helper method to calculate position using same logic as GPS dots

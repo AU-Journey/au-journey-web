@@ -7,7 +7,6 @@ class TramTracker {
     this.currentLocation = null;
     this.lastLocation = null;
     this.isMoving = false;
-    this.nextBuilding = null;
     this.lastPassedBuilding = null;
     
     // Movement detection settings
@@ -20,7 +19,7 @@ class TramTracker {
     this.lastUpdateTime = Date.now();
     this.lastMovementTime = Date.now();
     
-    // Updated building coordinates with optimized radius to match backend
+    // Updated building coordinates with optimized radius
     this.buildings = [
       {
         id: 'msm_building',
@@ -60,49 +59,12 @@ class TramTracker {
       }
     ];
     
-    // Continuous loop sequence - MSM → IT → AU Mall → Queen of Sheba → MSM
-    this.loopSequence = [
-      'msm_building',
-      'it_building',
-      'au_mall',
-      'queen_of_sheba'
-    ];
-    
     // Status change callbacks
     this.statusChangeCallbacks = [];
     this.lastNotifiedStatus = null;
-    
-    console.log('🚋 TramTracker initialized with continuous loop logic');
-    console.log('📍 Tram stops (continuous loop):', this.buildings.map(b => b.displayName).join(' → ') + ' → MSM');
   }
   
-  // Get next building in continuous loop: MSM → IT → AU Mall → Queen of Sheba → MSM
-  getNextBuilding(currentBuildingId) {
-    if (!currentBuildingId) {
-      return this.buildings[0]; // Start with MSM
-    }
-    
-    try {
-      // Find current building in the loop sequence
-      const currentIndex = this.loopSequence.findIndex(id => id === currentBuildingId);
-      if (currentIndex === -1) {
-        return this.buildings[0]; // Default to MSM if not found
-      }
-      
-      // Get next building in loop (wraps around to MSM after Queen of Sheba)
-      const nextIndex = (currentIndex + 1) % this.loopSequence.length;
-      const nextBuildingId = this.loopSequence[nextIndex];
-      
-      // Find the building object
-      return this.buildings.find(b => b.id === nextBuildingId) || this.buildings[0];
-      
-    } catch (error) {
-      console.error('Error getting next building:', error);
-      return this.buildings[0]; // Default to MSM
-    }
-  }
-  
-  // Improved position update with continuous loop logic
+  // Position update with basic tracking logic
   updatePosition(lat, lon) {
     const currentTime = Date.now();
     const newLocation = { lat, lon, timestamp: currentTime };
@@ -120,7 +82,7 @@ class TramTracker {
     // Check for building detection
     this.detectBuilding(lat, lon);
     
-    // Update status with continuous loop logic
+    // Update status
     this.updateStatus();
     
     this.lastUpdateTime = currentTime;
@@ -144,10 +106,7 @@ class TramTracker {
         // We're inside a building's radius
         if (!this.lastPassedBuilding || building.id !== this.lastPassedBuilding.id) {
           // New building detected
-          console.log(`🏢 Frontend: Tram entered building: ${building.displayName}`);
           this.lastPassedBuilding = building;
-          this.nextBuilding = this.getNextBuilding(building.id);
-          console.log(`🎯 Frontend: Next destination updated: ${this.nextBuilding.displayName} (continuous loop)`);
         }
         return building;
       }
@@ -155,7 +114,7 @@ class TramTracker {
     return null;
   }
   
-  // Improved movement detection
+  // Movement detection
   detectMovement() {
     if (!this.lastLocation || !this.currentLocation) {
       this.isMoving = false;
@@ -179,7 +138,7 @@ class TramTracker {
     }
   }
   
-  // Improved status update with continuous loop logic
+  // Status update logic
   updateStatus() {
     const currentTime = Date.now();
     const timeSinceMovement = currentTime - this.lastMovementTime;
@@ -188,7 +147,7 @@ class TramTracker {
       // Stopped for 30+ minutes
       this.currentStatus = 'Stopped';
     } else {
-      // Running - show continuous loop heading status
+      // Running
       this.currentStatus = 'Running';
     }
     
@@ -196,19 +155,9 @@ class TramTracker {
     this.checkStatusChange();
   }
   
-  // Get heading status - always "Heading to" in continuous loop
-  getHeadingStatus() {
-    if (this.nextBuilding && this.currentStatus === 'Running') {
-      return `Heading to ${this.nextBuilding.displayName}`;
-    }
-    return null;
-  }
-  
   // Check for status changes and notify subscribers
   checkStatusChange() {
     if (this.currentStatus !== this.lastNotifiedStatus) {
-      console.log(`📊 Frontend Tram status: ${this.lastNotifiedStatus || 'Unknown'} → ${this.currentStatus}`);
-      
       // Notify all status change callbacks
       this.statusChangeCallbacks.forEach(callback => {
         try {
@@ -216,11 +165,10 @@ class TramTracker {
             oldStatus: this.lastNotifiedStatus,
             newStatus: this.currentStatus,
             location: this.currentLocation,
-            headingTo: this.getHeadingStatus(),
             timestamp: Date.now()
           });
         } catch (error) {
-          console.error('Error calling status change callback:', error);
+          // Error calling status change callback
         }
       });
       
@@ -263,29 +211,26 @@ class TramTracker {
     return degrees * (Math.PI/180);
   }
   
-  // Improved tracking info with continuous loop
+  // Get tracking info
   getTrackingInfo() {
     return {
       status: this.currentStatus,
-      headingTo: this.getHeadingStatus(),
       isMoving: this.isMoving,
       currentLocation: this.currentLocation,
       lastPassedBuilding: this.lastPassedBuilding,
-      nextBuilding: this.nextBuilding,
       timestamp: Date.now(),
       locationHistoryLength: this.locationHistory.length,
       timeSinceLastMovement: Date.now() - this.lastMovementTime
     };
   }
   
-  // Improved API status with continuous loop
+  // Get status for API
   getStatusForAPI() {
     const info = this.getTrackingInfo();
     
     return {
       tram_id: 'tram_01_frontend',
       currentStatus: this.currentStatus,
-      headingTo: info.headingTo,
       location: {
         lat: info.currentLocation?.lat || null,
         lng: info.currentLocation?.lon || null
@@ -303,7 +248,6 @@ class TramTracker {
     this.currentLocation = null;
     this.lastLocation = null;
     this.isMoving = false;
-    this.nextBuilding = null;
     this.lastPassedBuilding = null;
     this.locationHistory = [];
     this.lastUpdateTime = Date.now();

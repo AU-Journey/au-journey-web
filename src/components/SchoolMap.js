@@ -27,8 +27,6 @@ import LoadingUI from './LoadingUI';
 import WeatherSystem from './WeatherSystem.js';
 import WeatherDisplay from './WeatherDisplay.js';
 import TramTracker from './TramTracker.js';
-import TramDebugUI from './TramDebugUI.js';
-import BackendAPI from '../api/BackendAPI.js';
 import { gpsRoute } from '../config/gpsRoute.js';
 
 class SchoolMap {
@@ -43,8 +41,6 @@ class SchoolMap {
     this.weatherSystem = null;
     this.weatherDisplay = null;
     this.tramTracker = null;
-    this.tramDebugUI = null;
-    this.backendAPI = null;
     
     // Debug UI throttling
     this.lastDebugUpdate = 0;
@@ -98,21 +94,6 @@ class SchoolMap {
     
     // Initialize enhanced tram tracking system
     this.tramTracker = new TramTracker();
-    
-    // Subscribe to status changes for better visual feedback
-    this.tramTracker.onStatusChange((statusData) => {
-      console.log('🚊 Tram Status Update:', statusData.newStatus);
-      if (statusData.nextStop) {
-        console.log(`📍 Next Stop: ${statusData.nextStop.displayName}`);
-      }
-    });
-    
-    // Initialize debug UI for development
-    this.tramDebugUI = new TramDebugUI();
-    
-    // Initialize Backend API for iOS integration
-    this.backendAPI = new BackendAPI();
-    this.backendAPI.startAPI();
 
     // Controls setup
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -133,7 +114,6 @@ class SchoolMap {
 
     // Start animation loop
     this.animate();
-    
     
     this.setupKeyboardControls(); // Only Space key
 
@@ -333,7 +313,6 @@ class SchoolMap {
       // Add stop label
       this.addStopLabel(stop, position);
       
-      console.log(`🚏 Added tram stop: ${stop.displayName} at (${position.x.toFixed(1)}, ${position.z.toFixed(1)})`);
     });
   }
   
@@ -365,14 +344,6 @@ class SchoolMap {
       if (event.code === 'Space') {
         event.preventDefault();
         this.toggleTramMovement();
-      }
-      
-      // Toggle debug UI with 'D' key
-      if (event.code === 'KeyD') {
-        event.preventDefault();
-        if (this.tramDebugUI) {
-          this.tramDebugUI.toggle();
-        }
       }
     });
   }
@@ -473,11 +444,6 @@ class SchoolMap {
       this.tramMovement.updateFromLiveGPS(lat, lon);
     }
     
-    // Update backend API with new position
-    if (this.backendAPI) {
-      this.backendAPI.updateTramPosition(lat, lon);
-    }
-    
     // Update local tracking system as fallback
     if (this.tramTracker) {
       this.tramTracker.updatePosition(lat, lon);
@@ -572,6 +538,10 @@ class SchoolMap {
     }
   }
   
+
+
+
+
   // Update tram tracking system continuously for iOS API
   updateTramTracking() {
     if (!this.tramMovement || !this.tramTracker || !this.tramMovement.tram) return;
@@ -586,13 +556,7 @@ class SchoolMap {
       // Update local tracker
       this.tramTracker.updatePosition(currentGPS.lat, currentGPS.lon);
       
-      // Send position to backend API for building detection (only when moving)
-      if (progress.isMoving && this.backendAPI) {
-        this.backendAPI.updateTramPosition(currentGPS.lat, currentGPS.lon);
-      }
-      
-      // Update debug UI
-      this.updateDebugUI(currentGPS, progress);
+
     }
   }
   
@@ -608,28 +572,15 @@ class SchoolMap {
     this.lastDebugUpdate = currentTime;
     
     try {
-      // Get backend status
-      const backendStatus = await this.backendAPI.getTramStatus();
-      
       // Prepare debug data
       const debugData = {
         frontendStatus: progress.isMoving ? 'Running' : 'Stopped',
-        position: currentGPS,
-        backendStatus: backendStatus?.data || null
+        position: currentGPS
       };
       
       // Update debug UI
       this.tramDebugUI.updateStatus(debugData);
       
-      // Console logging for additional debugging
-      if (progress.isMoving) {
-        console.log('🚊 Tram Position Update:', {
-          gps: `${currentGPS.lat.toFixed(6)}, ${currentGPS.lon.toFixed(6)}`,
-          progress: `${progress.currentIndex}/${progress.totalPoints}`,
-          backendStatus: backendStatus?.data?.currentStatus || 'Unknown',
-          headingTo: backendStatus?.data?.headingTo || 'Not Set'
-        });
-      }
     } catch (error) {
       console.warn('⚠️ Debug UI update failed:', error);
     }
@@ -675,17 +626,10 @@ class SchoolMap {
         // Convert 3D coordinates back to GPS coordinates
         const gpsCoords = this.threeDToGPS(point.x, point.z);
         
-        console.log('🗺️ Click Position:');
-        console.log(`   3D Coordinates: x=${point.x.toFixed(2)}, y=${point.y.toFixed(2)}, z=${point.z.toFixed(2)}`);
-        console.log(`   GPS Coordinates: lat=${gpsCoords.lat.toFixed(6)}, lon=${gpsCoords.lon.toFixed(6)}`);
-        console.log(`   Copy for tram stop: { lat: ${gpsCoords.lat.toFixed(6)}, lon: ${gpsCoords.lon.toFixed(6)} }`);
-        
         // Add a temporary marker at the clicked position
         this.addTemporaryMarker(point);
       }
     });
-    
-    console.log('🖱️ Click handler enabled - click on map to get coordinates for tram stops');
   }
   
   // Convert 3D coordinates back to GPS coordinates
@@ -728,6 +672,21 @@ class SchoolMap {
     setTimeout(() => {
       this.scene.remove(marker);
     }, 5000);
+  }
+
+  // Dispose of resources and cleanup
+  dispose() {
+    // Dispose weather system
+    if (this.weatherSystem) {
+      this.weatherSystem.dispose();
+      this.weatherSystem = null;
+    }
+    
+    // Dispose weather display
+    if (this.weatherDisplay) {
+      this.weatherDisplay.dispose();
+      this.weatherDisplay = null;
+    }
   }
 }
 
