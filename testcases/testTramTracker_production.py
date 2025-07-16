@@ -1,4 +1,4 @@
-import redis
+import requests
 import json
 import time
 from datetime import datetime, timezone
@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 TRAM_ID = "tram_1"
 UPDATE_INTERVAL = 2  # seconds between updates
 MAX_ACCEPTABLE_GAP = 300  # same as original code
+
+# Production API endpoint (your Vercel deployment)
+API_URL = "https://au-journey-4rr7ppgi1-au-journeys-projects.vercel.app/api/redis/gps_data"
 
 # GPS test route
 GPS_ROUTE = [
@@ -48,45 +51,28 @@ GPS_ROUTE = [
     {"lat": 13.612937, "lon": 100.831829},
     {"lat": 13.612962, "lon": 100.831739},
     {"lat": 13.612986, "lon": 100.831645},
-    {"lat": 13.613009, "lon": 100.831551},
-    {"lat": 13.613034, "lon": 100.831459},
-    {"lat": 13.613068, "lon": 100.831338},
-    {"lat": 13.613114, "lon": 100.831223},
-    {"lat": 13.613205, "lon": 100.831203},
-    {"lat": 13.613314, "lon": 100.831234},
-    {"lat": 13.613409, "lon": 100.831262},
-    {"lat": 13.613503, "lon": 100.831290},
-    {"lat": 13.613596, "lon": 100.831317},
-    {"lat": 13.613692, "lon": 100.831346},
-    {"lat": 13.613789, "lon": 100.831373},
-    {"lat": 13.613881, "lon": 100.831400},
-    {"lat": 13.613968, "lon": 100.831425},
-    {"lat": 13.614096, "lon": 100.831462},
-    {"lat": 13.614223, "lon": 100.831500},
-    {"lat": 13.614341, "lon": 100.831533},
-    {"lat": 13.614444, "lon": 100.831560},
-    {"lat": 13.614511, "lon": 100.831654},
-    {"lat": 13.614485, "lon": 100.831764},
-    {"lat": 13.614458, "lon": 100.831869},
-    {"lat": 13.614430, "lon": 100.831970},
-    {"lat": 13.614375, "lon": 100.832160},
-    {"lat": 13.614337, "lon": 100.832286},
-    {"lat": 13.614310, "lon": 100.832388},
-    {"lat": 13.614277, "lon": 100.832501},
-    {"lat": 13.614220, "lon": 100.832695},
-    {"lat": 13.614193, "lon": 100.832788},
-    {"lat": 13.614158, "lon": 100.832906},
-    {"lat": 13.614128, "lon": 100.833007},
-    {"lat": 13.614067, "lon": 100.833220},
-    {"lat": 13.614040, "lon": 100.833315},
-    {"lat": 13.614005, "lon": 100.833436},
-    {"lat": 13.613983, "lon": 100.833545},
-    {"lat": 13.613884, "lon": 100.833614},
-    {"lat": 13.613775, "lon": 100.833604},
-    {"lat": 13.613670, "lon": 100.833580},
-    {"lat": 13.613572, "lon": 100.833552},
-    {"lat": 13.613482, "lon": 100.833526},
-    {"lat": 13.613395, "lon": 100.833500},
+    {"lat": 13.613007, "lon": 100.831560},
+    {"lat": 13.613032, "lon": 100.831466},
+    {"lat": 13.613053, "lon": 100.831380},
+    {"lat": 13.613075, "lon": 100.831292},
+    {"lat": 13.613095, "lon": 100.831208},
+    {"lat": 13.613115, "lon": 100.831125},
+    {"lat": 13.613134, "lon": 100.831045},
+    {"lat": 13.613152, "lon": 100.830968},
+    {"lat": 13.613170, "lon": 100.830893},
+    {"lat": 13.613187, "lon": 100.830820},
+    {"lat": 13.613203, "lon": 100.830749},
+    {"lat": 13.613218, "lon": 100.830681},
+    {"lat": 13.613232, "lon": 100.830615},
+    {"lat": 13.613246, "lon": 100.830551},
+    {"lat": 13.613258, "lon": 100.830489},
+    {"lat": 13.613270, "lon": 100.830429},
+    {"lat": 13.613282, "lon": 100.830371},
+    {"lat": 13.613293, "lon": 100.830315},
+    {"lat": 13.613303, "lon": 100.830261},
+    {"lat": 13.613298, "lon": 100.830298},
+    {"lat": 13.613304, "lon": 100.830376},
+    {"lat": 13.613298, "lon": 100.830472},
     {"lat": 13.613309, "lon": 100.833474},
     {"lat": 13.613202, "lon": 100.833545},
     {"lat": 13.613141, "lon": 100.833766},
@@ -148,32 +134,30 @@ GPS_ROUTE = [
     {"lat": 13.612527, "lon": 100.840321}
 ]
 
-class TestTramTracker:
+
+class ProductionTramTracker:
     def __init__(self):
-        self.redis_client = self._connect_redis()
         self.current_point = None
         self.previous_point = None
         self.last_update_time = time.time()
+        self._test_api_connection()
         
-    def _connect_redis(self):
+    def _test_api_connection(self):
+        """Test if the API endpoint is accessible"""
         try:
-            client = redis.StrictRedis(
-                host="redis-15238.crce178.ap-east-1-1.ec2.redns.redis-cloud.com",
-                port=15238,
-                password="HOwS9Ta53CidWxys59VlS51v2yp88tY9",
-                decode_responses=True
-            )
-            client.ping()
-            print("Successfully connected to Redis")
-            return client
+            response = requests.get(f"{API_URL.replace('/redis/gps_data', '/health')}", timeout=10)
+            if response.status_code == 200:
+                print("✅ Successfully connected to Vercel API")
+            else:
+                print(f"⚠️  API returned status {response.status_code}")
         except Exception as e:
-            print(f"Redis Connection Failed: {e}")
-            exit(1)
+            print(f"❌ API Connection Test Failed: {e}")
+            print("🔧 Note: Make sure to disable Vercel Authentication in your dashboard")
 
     def get_utc_timestamp(self):
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
-    def update_redis(self, point):
+    def update_api(self, point):
         current_time = self.get_utc_timestamp()
         
         new_point = {
@@ -198,27 +182,40 @@ class TestTramTracker:
                 "s": "active"
             }
             
-            self.redis_client.setex(f"t:{TRAM_ID}", MAX_ACCEPTABLE_GAP, json.dumps(tram_data))
+            try:
+                # Send data to Vercel API
+                response = requests.post(API_URL, json=tram_data, timeout=10)
+                
+                if response.status_code == 200:
+                    print(f"✅ Updated position: Lat: {point['lat']:.6f}, Lon: {point['lon']:.6f}")
+                else:
+                    print(f"❌ API Error {response.status_code}: {response.text}")
+                    
+            except Exception as e:
+                print(f"❌ Failed to send data to API: {e}")
+            
             self.last_update_time = time.time()
-            print(f"Updated position: Lat: {point['lat']}, Lon: {point['lon']}")
 
     def run(self, loop=True):
-        print(f"Starting test tram tracker simulation for Tram {TRAM_ID}")
+        print(f"🚋 Starting production tram tracker simulation for Tram {TRAM_ID}")
+        print(f"📍 API Endpoint: {API_URL}")
+        print("🔄 Press Ctrl+C to stop")
         
         while True:
-            for point in GPS_ROUTE:
-                self.update_redis(point)
+            for i, point in enumerate(GPS_ROUTE):
+                self.update_api(point)
+                print(f"📍 Point {i+1}/{len(GPS_ROUTE)} - Next update in {UPDATE_INTERVAL}s...")
                 time.sleep(UPDATE_INTERVAL)
             
             if not loop:
                 break
             
-            print("Route completed, starting over...")
+            print("🔄 Route completed, starting over...")
 
 if __name__ == "__main__":
-    tracker = TestTramTracker()
+    tracker = ProductionTramTracker()
     try:
         # Set loop=True to continuously repeat the route, or False to run once
         tracker.run(loop=True)
     except KeyboardInterrupt:
-        print("\nSimulation stopped by user")
+        print("\n🛑 Simulation stopped by user") 

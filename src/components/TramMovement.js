@@ -1,29 +1,53 @@
 // TramMovement.js
 import { Vector3 } from 'three';
 import gsap from 'gsap';
+import RedisGPSService from '../services/RedisGPSService.js';
 
 class TramMovement {
-  constructor(tram, gpsTo3DCoords, gpsPoints, offset = new Vector3(0, 0, 0)) {
+  constructor(tram, gpsTo3DCoords, gpsPoints = null, offset = new Vector3(0, 0, 0), redisConfig = {}) {
     this.tram = tram;
-    this.gpsPoints = gpsPoints;
     this.offset = offset;
-    this.currentIndex = 0;
     this.isMoving = false;
     this.baseHeight = -0.3; // Lowered to match initial placement
     this.currentTween = null;
     
-    // Speed settings (units per second) - much slower for realistic movement
+    // Speed settings (units per second) - inspired by your smooth version
     this.tramSpeed = 10; // Slower speed for realistic tram movement
     this.rotationSpeed = 1; // Slower rotation for smoother turning
-
-    // Calculate coordinate system parameters once
-    const firstPoint = this.gpsPoints[0];
-    const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
-    this.centerLat = (firstPoint.lat + lastPoint.lat) / 2;
-    this.centerLon = (firstPoint.lon + lastPoint.lon) / 2;
+    
+    // Redis GPS service
+    this.redisGPS = new RedisGPSService(redisConfig);
+    
+    // GPS tracking
+    this.currentGPS = null;
+    this.previousGPS = null;
+    this.lastUpdateTime = 0;
+    this.updateInterval = 2000; // Update every 2 seconds to reduce load
+    
+    // For fallback/initial positioning, use static GPS points if provided
+    this.fallbackGPSPoints = gpsPoints;
+    
+    // Calculate coordinate system parameters
+    // Use static points for coordinate system if available, otherwise use default center
+    if (gpsPoints && gpsPoints.length > 0) {
+      const firstPoint = gpsPoints[0];
+      const lastPoint = gpsPoints[gpsPoints.length - 1];
+      this.centerLat = (firstPoint.lat + lastPoint.lat) / 2;
+      this.centerLon = (firstPoint.lon + lastPoint.lon) / 2;
+    } else {
+      // Default center coordinates (can be adjusted based on your area)
+      this.centerLat = 13.612565; // Default to AU area
+      this.centerLon = 100.836516;
+    }
     this.scale = 100000;
-
-
+    
+    // Movement state
+    this.isRealTimeMode = true;
+    this.lastKnownPosition = null;
+    this.lastStaleWarning = 0;
+    
+    // Start real-time GPS tracking
+    this.startRealTimeTracking();
   }
 
   // Helper method to calculate position using same logic as GPS dots
@@ -35,55 +59,119 @@ class TramMovement {
     };
   }
 
-  start() {
-    if (!this.tram || !this.gpsPoints.length) {
-      console.warn('⚠️ Cannot start tram movement: missing tram or GPS points');
+  async startRealTimeTracking() {
+    if (!this.isRealTimeMode) return;
+    
+    // Starting GPS tracking
+    
+    // Wait a moment for Redis service to initialize
+    setTimeout(async () => {
+      // Initial positioning from Redis
+      await this.updateFromRedis();
+      
+      // Set up periodic updates
+      this.trackingInterval = setInterval(async () => {
+        if (this.isRealTimeMode) {
+          await this.updateFromRedis();
+        }
+      }, this.updateInterval);
+    }, 1000); // Give Redis service time to initialize
+  }
+
+  async updateFromRedis() {
+    try {
+      const gpsData = await this.redisGPS.getBothGPSPoints();
+      
+      if (gpsData.current && gpsData.previous) {
+        // Check if GPS data is stale
+        const isStale = this.redisGPS.isGPSDataStale(gpsData.current.timestamp);
+        if (isStale) {
+          // Only log staleness once to avoid spam
+          if (!this.lastStaleWarning || Date.now() - this.lastStaleWarning > 30000) {
+            console.warn('⏰ GPS data is stale - keeping tram stationary');
+            this.lastStaleWarning = Date.now();
+          }
+          this.stopTramMovement();
+          return;
+        }
+        
+        // Check if GPS coordinates have actually changed
+        const hasChanged = this.redisGPS.hasGPSChanged(gpsData.current, gpsData.previous);
+        if (!hasChanged) {
+          // Don't log unchanged coordinates to reduce noise
+          this.stopTramMovement();
+          return;
+        }
+        
+        // GPS has changed - update tram position
+        // Check if we need to create synthetic previous GPS for smooth movement
+        if (!this.currentGPS) {
+          // First time - set both current and previous
+          this.currentGPS = gpsData.current;
+          this.previousGPS = gpsData.previous || gpsData.current;
+        } else {
+          // Update: current becomes previous, new current from data
+          this.previousGPS = { ...this.currentGPS };
+          this.currentGPS = gpsData.current;
+        }
+        
+        // Update tram position with smooth movement
+        this.updateTramPosition();
+        
+        this.lastUpdateTime = Date.now();
+        
+        // Only log movement in development
+        if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+          console.log('📍 Tram moving to:', {
+            lat: this.currentGPS.lat.toFixed(6), 
+            lon: this.currentGPS.lon.toFixed(6)
+          });
+        }
+      } else {
+        console.warn('⚠️ Incomplete GPS data from Redis - keeping tram stationary');
+        this.stopTramMovement();
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to update tram position from Redis:', error);
+      this.stopTramMovement();
+    }
+  }
+
+  updateTramPosition() {
+    if (!this.tram || !this.currentGPS || !this.previousGPS) return;
+    
+    const currentPosition = this.calculatePosition(this.currentGPS.lat, this.currentGPS.lon);
+    const previousPosition = this.calculatePosition(this.previousGPS.lat, this.previousGPS.lon);
+    
+    // Store last known position for fallback
+    this.lastKnownPosition = currentPosition;
+    
+    // Calculate movement direction and distance
+    const dx = currentPosition.x - previousPosition.x;
+    const dz = currentPosition.z - previousPosition.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    
+    // Skip if distance is too small
+    if (distance < 0.5) {
       return;
     }
     
-    this.isMoving = true;
-    this.moveToNextPoint();
-  }
-
-  stop() {
-    this.isMoving = false;
+    // Stop current movement
     if (this.currentTween) {
       this.currentTween.kill();
-      this.currentTween = null;
     }
-  }
-
-  moveToNextPoint() {
-    if (!this.isMoving || this.currentIndex >= this.gpsPoints.length) return;
-
-    const gps = this.gpsPoints[this.currentIndex];
-    const position = this.calculatePosition(gps.lat, gps.lon);
-
-    // Calculate distance to target
-    const dx = position.x - this.tram.position.x;
-    const dz = position.z - this.tram.position.z;
-    const distance = Math.sqrt(dx * dx + dz * dz);
-
-    // Skip if distance is too small
-    if (distance < 0.5) {
-      this.currentIndex++;
-      if (this.currentIndex >= this.gpsPoints.length) {
-        this.currentIndex = 0;
-      }
-      setTimeout(() => this.moveToNextPoint(), 300);
-      return;
-    }
-
-    // Calculate duration based on speed and distance
+    
+    // Calculate duration based on speed and distance (inspired by your smooth version)
     const duration = Math.max(1.0, distance / this.tramSpeed);
-
+    
     // Calculate rotation to face movement direction
-    const modelForwardOffset = - Math.PI / 2; // Adjust if needed for your model
+    const modelForwardOffset = -Math.PI / 2; // Adjust based on your model
     const targetRotation = Math.atan2(dx, dz) + modelForwardOffset;
-
-    // Create timeline for movement
+    
+    // Create timeline for movement (inspired by your smooth version)
     const tl = gsap.timeline();
-
+    
     // Handle rotation first - make sure tram faces direction before moving
     const currentRotation = this.tram.rotation.y;
     let rotationDiff = targetRotation - currentRotation;
@@ -91,7 +179,7 @@ class TramMovement {
     // Handle rotation wrapping
     if (rotationDiff > Math.PI) rotationDiff -= 2 * Math.PI;
     if (rotationDiff < -Math.PI) rotationDiff += 2 * Math.PI;
-
+    
     // Always rotate first if needed
     if (Math.abs(rotationDiff) > 0.05) {
       const rotationDuration = Math.min(1.0, Math.abs(rotationDiff) / this.rotationSpeed);
@@ -101,52 +189,158 @@ class TramMovement {
         ease: 'power2.inOut'
       });
     }
-
+    
     // Move to target after rotation
     tl.to(this.tram.position, {
       duration: duration,
-      x: position.x,
-      y: position.y,
-      z: position.z,
+      x: currentPosition.x,
+      y: currentPosition.y,
+      z: currentPosition.z,
       ease: 'none', // Linear movement for consistent speed
       onComplete: () => {
-        this.onPointReached();
+        this.isMoving = false; // Mark as stationary when reached
       }
     });
-
+    
     this.currentTween = tl;
+    this.isMoving = true;
   }
-
-  onPointReached() {
-    if (!this.isMoving) return;
-
-    // Small delay before moving to next point for more realistic movement
-    setTimeout(() => {
-      if (this.isMoving) {
-        this.moveToNextPoint();
-      }
-    }, 500); // Longer pause at each GPS point
-  }
-
-  // Method to update tram position from live GPS (if needed)
-  updateFromLiveGPS(lat, lon) {
-    if (!this.tram) return;
-
-    const position = this.calculatePosition(lat, lon);
-
-    // Stop current movement
+  
+  stopTramMovement() {
+    // Stop any ongoing movement animations
     if (this.currentTween) {
       this.currentTween.kill();
+      this.currentTween = null;
     }
+    
+    // Mark tram as not moving
+    this.isMoving = false;
+    
+    // Movement stopped
+  }
 
-    // Smoothly move to live GPS position
-    gsap.to(this.tram.position, {
-      duration: 1.5,
-      x: position.x,
-      y: position.y,
-      z: position.z,
-      ease: 'power2.out'
-    });
+  calculateAndApplyMovement() {
+    // This method is now handled by updateTramPosition()
+    // Keeping for legacy compatibility
+    this.updateTramPosition();
+  }
+
+  handleRedisError() {
+    console.warn('⚠️ Redis GPS unavailable, checking fallback options...');
+    
+    // Use last known position if available
+    if (this.lastKnownPosition && this.tram) {
+      console.log('📍 Using last known position for tram');
+      return;
+    }
+    
+    // If no GPS data at all, initialize with fallback GPS points
+    if (!this.currentGPS && this.fallbackGPSPoints && this.fallbackGPSPoints.length > 0) {
+      // Using fallback GPS data
+      const firstPoint = this.fallbackGPSPoints[0];
+      this.currentGPS = {
+        lat: firstPoint.lat,
+        lon: firstPoint.lon,
+        timestamp: Date.now()
+      };
+      
+      if (this.fallbackGPSPoints.length > 1) {
+        const secondPoint = this.fallbackGPSPoints[1];
+        this.previousGPS = {
+          lat: secondPoint.lat,
+          lon: secondPoint.lon,
+          timestamp: Date.now() - 5000
+        };
+      }
+      
+      // Position tram at the first point
+      this.updateTramPosition();
+    }
+    
+    // Fallback to static GPS points if needed
+    if (this.fallbackGPSPoints && this.fallbackGPSPoints.length > 0) {
+      // Fallback mode available
+    }
+  }
+
+  switchToFallbackMode() {
+    this.isRealTimeMode = false;
+    
+    if (this.trackingInterval) {
+      clearInterval(this.trackingInterval);
+    }
+    
+    // Position tram at first fallback point
+    if (this.fallbackGPSPoints && this.fallbackGPSPoints.length > 0) {
+      const firstPoint = this.fallbackGPSPoints[0];
+      const position = this.calculatePosition(firstPoint.lat, firstPoint.lon);
+      
+      if (this.tram) {
+        gsap.to(this.tram.position, {
+          duration: 2.0,
+          x: position.x,
+          y: position.y,
+          z: position.z,
+          ease: 'power2.out'
+        });
+      }
+    }
+  }
+
+  // Legacy compatibility methods
+  start() {
+    console.log('🚊 Tram movement start requested - enabling real-time mode');
+    
+    if (!this.isRealTimeMode) {
+      this.isRealTimeMode = true;
+      this.startRealTimeTracking();
+    }
+  }
+
+  stop() {
+    console.log('🚊 Tram movement stop requested');
+    this.isMoving = false;
+    
+    if (this.currentTween) {
+      this.currentTween.kill();
+      this.currentTween = null;
+    }
+    
+    if (this.trackingInterval) {
+      clearInterval(this.trackingInterval);
+      this.trackingInterval = null;
+    }
+    
+    this.isRealTimeMode = false;
+  }
+
+  // Method to update tram position from live GPS (legacy compatibility)
+  updateFromLiveGPS(lat, lon) {
+    if (!this.tram) return;
+    
+    // Create synthetic GPS data for smooth movement
+    const newGPS = { 
+      lat, 
+      lon, 
+      timestamp: new Date().toISOString() 
+    };
+    
+    // Store current as previous for smooth movement
+    if (this.currentGPS) {
+      this.previousGPS = { ...this.currentGPS };
+    } else {
+      this.previousGPS = newGPS; // First time
+    }
+    
+    this.currentGPS = newGPS;
+    
+    // Use the smooth movement system
+    this.updateTramPosition();
+    
+    // Only log in development
+    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+      console.log('📍 GPS updated via legacy method:', { lat, lon });
+    }
   }
 
   // Method to set tram speed dynamically
@@ -157,11 +351,40 @@ class TramMovement {
   // Get current progress information
   getProgress() {
     return {
-      currentIndex: this.currentIndex,
-      totalPoints: this.gpsPoints.length,
-      isMoving: this.isMoving,
-      progress: (this.currentIndex / this.gpsPoints.length) * 100
+      currentIndex: 0, // Not applicable in real-time mode
+      totalPoints: this.fallbackGPSPoints ? this.fallbackGPSPoints.length : 0,
+      isMoving: this.isRealTimeMode,
+      progress: 100, // Always "complete" in real-time mode
+      realTimeMode: this.isRealTimeMode,
+      currentGPS: this.currentGPS,
+      previousGPS: this.previousGPS,
+      lastUpdateTime: this.lastUpdateTime,
+      redisStatus: this.redisGPS.getConnectionStatus()
     };
+  }
+
+  // Get Redis GPS service status
+  getRedisStatus() {
+    return this.redisGPS.getConnectionStatus();
+  }
+
+  // Configure Redis connection
+  configureRedis(config) {
+    this.redisGPS = new RedisGPSService(config);
+    if (this.isRealTimeMode) {
+      this.startRealTimeTracking();
+    }
+  }
+
+  // Cleanup
+  dispose() {
+    this.stop();
+    
+    if (this.redisGPS) {
+      this.redisGPS.disconnect();
+    }
+    
+    console.log('🚊 TramMovement disposed');
   }
 }
 

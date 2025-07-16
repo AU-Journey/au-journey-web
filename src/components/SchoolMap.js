@@ -114,8 +114,6 @@ class SchoolMap {
 
     // Start animation loop
     this.animate();
-    
-    this.setupKeyboardControls(); // Only Space key
 
     // Handle window resize
     window.addEventListener('resize', this.onWindowResize.bind(this));
@@ -338,15 +336,7 @@ class SchoolMap {
     };
   }
 
-  setupKeyboardControls() {
-    window.addEventListener('keydown', (event) => {
-      // Only keep Space key for tram movement
-      if (event.code === 'Space') {
-        event.preventDefault();
-        this.toggleTramMovement();
-      }
-    });
-  }
+
 
   onWindowResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -381,16 +371,7 @@ class SchoolMap {
     this.renderer.render(this.scene, this.camera);
   }
 
-  // Start or stop tram movement
-  toggleTramMovement() {
-    if (!this.tramMovement) return;
-    
-    if (this.tramMovement.isMoving) {
-      this.tramMovement.stop();
-    } else {
-      this.tramMovement.start();
-    }
-  }
+
 
   // Add target indicator to show which GPS point tram is moving towards
   addTargetIndicator() {
@@ -415,10 +396,33 @@ class SchoolMap {
     if (!this.tramMovement || !this.targetIndicator) return;
     
     const progress = this.tramMovement.getProgress();
-    if (progress.isMoving && progress.currentIndex < this.gpsPoints.length) {
+    
+    // In real-time mode, show current GPS position as target
+    if (progress.realTimeMode && progress.currentGPS) {
+      // Use same positioning as GPS dots
+      const firstPoint = this.gpsPoints[0];
+      const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
+      const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
+      const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
+      const scale = 100000;
+      
+      const targetPos = {
+        x: (progress.currentGPS.lat - centerLat) * scale,
+        y: 6, // Higher than other dots
+        z: (progress.currentGPS.lon - centerLon) * scale
+      };
+      
+      this.targetIndicator.position.set(targetPos.x, targetPos.y, targetPos.z);
+      this.targetIndicator.visible = true;
+      
+      // Change color to indicate real-time mode
+      if (this.targetIndicator.material) {
+        this.targetIndicator.material.color.setHex(0x00ffff); // Cyan for real-time
+      }
+    } else if (progress.isMoving && progress.currentIndex < this.gpsPoints.length) {
+      // Fallback mode - use static GPS points
       const targetGPS = this.gpsPoints[progress.currentIndex];
       
-      // Use same positioning as GPS dots
       const firstPoint = this.gpsPoints[0];
       const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
       const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
@@ -433,18 +437,30 @@ class SchoolMap {
       
       this.targetIndicator.position.set(targetPos.x, targetPos.y, targetPos.z);
       this.targetIndicator.visible = true;
+      
+      // Change color to indicate fallback mode
+      if (this.targetIndicator.material) {
+        this.targetIndicator.material.color.setHex(0xffff00); // Yellow for fallback
+      }
     } else {
       this.targetIndicator.visible = false;
     }
   }
 
-  // Method to update tram position from live GPS (called from main.js)
+  // Method to update tram position from live GPS (legacy method - Redis is now primary)
   updateTramPositionFromLiveGPS(lat, lon) {
+    console.log('📍 Legacy GPS update called - Redis is now primary data source');
+    
+    // This method is primarily for fallback when Redis is unavailable
     if (this.tramMovement) {
-      this.tramMovement.updateFromLiveGPS(lat, lon);
+      const redisStatus = this.tramMovement.getRedisStatus();
+      if (!redisStatus.isConnected) {
+        console.log('🔄 Using legacy GPS update as Redis fallback');
+        this.tramMovement.updateFromLiveGPS(lat, lon);
+      }
     }
     
-    // Update local tracking system as fallback
+    // Always update local tracking system as secondary data source
     if (this.tramTracker) {
       this.tramTracker.updatePosition(lat, lon);
     }
@@ -457,16 +473,25 @@ class SchoolMap {
       return;
     }
 
-    // Create TramMovement instance using the real tram model
+    // Redis configuration - will use defaults in RedisGPSService
+    // In browser environment, this will use HTTP proxy automatically
+    const redisConfig = {
+      // Let RedisGPSService handle environment detection and defaults
+    };
+
+    // Create TramMovement instance with Redis integration
     this.tramMovement = new TramMovement(
       this.tram,
       null,
-      this.gpsPoints,
-      new Vector3(0, 0, 0)
+      this.gpsPoints, // Fallback GPS points
+      new Vector3(0, 0, 0),
+      redisConfig
     );
     
     // Add current target indicator
     this.addTargetIndicator();
+    
+    console.log('🚊 TramMovement initialized with Redis integration');
   }
 
   loadTramFBXModel() {
@@ -542,21 +567,28 @@ class SchoolMap {
 
 
 
-  // Update tram tracking system continuously for iOS API
+  // Update tram tracking system continuously for Redis GPS data
   updateTramTracking() {
     if (!this.tramMovement || !this.tramTracker || !this.tramMovement.tram) return;
     
-    // Get current tram progress
+    // Get current tram progress (now includes Redis GPS data)
     const progress = this.tramMovement.getProgress();
     if (!progress) return;
     
-    // Get current GPS point based on tram's current index
-    const currentGPS = this.gpsPoints[progress.currentIndex];
-    if (currentGPS) {
-      // Update local tracker
-      this.tramTracker.updatePosition(currentGPS.lat, currentGPS.lon);
+    // Use real-time GPS data from Redis if available
+    if (progress.currentGPS) {
+      // Update local tracker with real-time GPS data
+      this.tramTracker.updatePosition(progress.currentGPS.lat, progress.currentGPS.lon);
       
-
+      // Update debug UI if available
+      this.updateDebugUI(progress.currentGPS, progress);
+    } else if (progress.realTimeMode === false && this.gpsPoints && progress.currentIndex < this.gpsPoints.length) {
+      // Fallback to static GPS points if Redis is unavailable
+      const currentGPS = this.gpsPoints[progress.currentIndex];
+      if (currentGPS) {
+        this.tramTracker.updatePosition(currentGPS.lat, currentGPS.lon);
+        this.updateDebugUI(currentGPS, progress);
+      }
     }
   }
   
@@ -676,6 +708,12 @@ class SchoolMap {
 
   // Dispose of resources and cleanup
   dispose() {
+    // Dispose tram movement system and Redis connection
+    if (this.tramMovement) {
+      this.tramMovement.dispose();
+      this.tramMovement = null;
+    }
+    
     // Dispose weather system
     if (this.weatherSystem) {
       this.weatherSystem.dispose();
@@ -687,6 +725,8 @@ class SchoolMap {
       this.weatherDisplay.dispose();
       this.weatherDisplay = null;
     }
+    
+    console.log('🧹 SchoolMap resources disposed');
   }
 }
 
