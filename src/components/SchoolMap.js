@@ -19,6 +19,7 @@ import WeatherSystem from './WeatherSystem.js';
 import WeatherDisplay from './WeatherDisplay.js';
 import TramTracker from './TramTracker.js';
 import { gpsRoute } from '../config/gpsRoute.js';
+import { optimizeRenderer, optimizeMaterial, optimizeScene, disposeObject } from '../utils/renderingOptimizations.js';
 
 class SchoolMap {
   constructor(container) {
@@ -48,15 +49,13 @@ class SchoolMap {
   }
 
   init() {
-    // Renderer setup with optimizations
+    // Renderer setup with optimizations using utility functions
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap at 2 for performance
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
     this.renderer.setClearColor(0xbfd1e5); // Sky blue background
-    this.renderer.shadowMap.autoUpdate = false; // Manual update for performance
-    this.renderer.powerPreference = "high-performance";
     this.container.appendChild(this.renderer.domElement);
+    
+    // Apply rendering optimizations from utility
+    optimizeRenderer(this.renderer);
 
     // Camera setup: focus on a central area
     this.camera.position.set(0, 20, 50);
@@ -72,6 +71,13 @@ class SchoolMap {
     directionalLight.castShadow = true;
     directionalLight.shadow.mapSize.width = 2048;
     directionalLight.shadow.mapSize.height = 2048;
+    // Optimize shadow camera for better performance
+    directionalLight.shadow.camera.near = 0.1;
+    directionalLight.shadow.camera.far = 500;
+    directionalLight.shadow.camera.left = -100;
+    directionalLight.shadow.camera.right = 100;
+    directionalLight.shadow.camera.top = 100;
+    directionalLight.shadow.camera.bottom = -100;
     this.scene.add(directionalLight);
     this.directionalLight = directionalLight; // Store reference for weather system
 
@@ -121,21 +127,42 @@ class SchoolMap {
         this.mapModel.rotation.y = MathUtils.degToRad(165);
         this.mapModel.position.set(-300, 0, 220);
 
-        // Fix grass/transparent material
+        // Fix grass/transparent material and apply optimizations
         this.mapModel.traverse((child) => {
           if (child.isMesh && child.material) {
-            // If the material is transparent (likely grass), apply fixes
+            // Enhanced grass/transparent material fix
             if (child.material.transparent || (child.material.map && child.material.alphaMap)) {
-              child.material.alphaTest = 0.5;
-              child.material.depthWrite = false;
+              // Improved grass rendering to prevent glitching
+              child.material.alphaTest = 0.1; // Lower threshold for better grass visibility
+              child.material.depthWrite = true; // Enable depth writing for proper sorting
               child.material.side = DoubleSide;
+              child.material.transparent = true;
+              child.material.opacity = 0.95; // Slightly reduce opacity to help with z-fighting
+              
+              // Prevent z-fighting by slightly adjusting polygon offset
+              child.material.polygonOffset = true;
+              child.material.polygonOffsetFactor = 1;
+              child.material.polygonOffsetUnits = 1;
             }
+            
+            // Apply material optimizations
+            optimizeMaterial(child.material);
+            
+            // Shadow settings
             child.receiveShadow = true;
             child.castShadow = true;
+            
+            // Mark static objects for performance
+            if (!child.name.includes('dynamic') && !child.name.includes('animated')) {
+              child.userData.static = true;
+            }
           }
         });
 
         this.scene.add(this.mapModel);
+        
+        // Apply scene optimizations after adding the model
+        this.optimizeMapScene();
 
         // Hide loading UI after map is loaded
         if (this.loadingUI) this.loadingUI.hide();
@@ -145,6 +172,27 @@ class SchoolMap {
         console.error('Error loading map model:', error);
       }
     );
+  }
+
+  // Apply scene optimizations specifically for the map
+  optimizeMapScene() {
+    // Apply general scene optimizations
+    optimizeScene(this.scene);
+    
+    // Update shadow map only when needed
+    this.renderer.shadowMap.needsUpdate = true;
+    
+    // Force matrix updates for static objects
+    if (this.mapModel) {
+      this.mapModel.traverse((child) => {
+        if (child.userData.static) {
+          child.matrixAutoUpdate = false;
+          child.updateMatrix();
+        }
+      });
+    }
+    
+    console.log('🎯 Scene optimizations applied');
   }
 
   onWindowResize() {
@@ -256,11 +304,20 @@ class SchoolMap {
       this.tram.position.set(0, -0.3, 0); // Temporary position until Redis data arrives
       this.tram.rotation.y = Math.PI; // Rotate tram 180 degrees for correct forward direction
 
-      // Remove forced yellow material: do not override child.material
+      // Apply optimizations to tram model
       this.tram.traverse((child) => {
         if (child.isMesh) {
           child.castShadow = true;
           child.receiveShadow = true;
+          
+          // Apply material optimizations if material exists
+          if (child.material) {
+            optimizeMaterial(child.material);
+          }
+          
+          // Mark as dynamic object (not static)
+          child.userData.static = false;
+          child.frustumCulled = true; // Enable frustum culling
         }
       });
 
@@ -387,6 +444,16 @@ class SchoolMap {
     if (this.weatherDisplay) {
       this.weatherDisplay.dispose();
       this.weatherDisplay = null;
+    }
+    
+    // Dispose map model properly
+    if (this.mapModel) {
+      disposeObject(this.mapModel);
+    }
+    
+    // Dispose tram model properly
+    if (this.tram) {
+      disposeObject(this.tram);
     }
     
     console.log('🧹 SchoolMap resources disposed');
