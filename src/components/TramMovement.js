@@ -62,27 +62,25 @@ class TramMovement {
   async startRealTimeTracking() {
     if (!this.isRealTimeMode) return;
     
-    // Starting GPS tracking
+    // Starting GPS tracking - immediate initial positioning
+    console.log('🚊 Starting real-time GPS tracking...');
     
-    // Wait a moment for Redis service to initialize
-    setTimeout(async () => {
-      // Initial positioning from Redis
-      await this.updateFromRedis();
-      
-      // Set up periodic updates
-      this.trackingInterval = setInterval(async () => {
-        if (this.isRealTimeMode) {
-          await this.updateFromRedis();
-        }
-      }, this.updateInterval);
-    }, 1000); // Give Redis service time to initialize
+    // Immediate initial positioning from Redis
+    await this.updateFromRedis();
+    
+    // Set up periodic updates
+    this.trackingInterval = setInterval(async () => {
+      if (this.isRealTimeMode) {
+        await this.updateFromRedis();
+      }
+    }, this.updateInterval);
   }
 
   async updateFromRedis() {
     try {
       const gpsData = await this.redisGPS.getBothGPSPoints();
       
-      if (gpsData.current && gpsData.previous) {
+      if (gpsData.current) {
         // Check if GPS data is stale
         const isStale = this.redisGPS.isGPSDataStale(gpsData.current.timestamp);
         if (isStale) {
@@ -95,25 +93,30 @@ class TramMovement {
           return;
         }
         
-        // Check if GPS coordinates have actually changed
-        const hasChanged = this.redisGPS.hasGPSChanged(gpsData.current, gpsData.previous);
+        // First time loading - position tram immediately at current GPS
+        if (!this.currentGPS) {
+          console.log('🎯 Initial tram positioning from Redis GPS');
+          this.currentGPS = gpsData.current;
+          this.previousGPS = gpsData.previous || gpsData.current;
+          
+          // Position tram immediately at current GPS location
+          this.positionTramImmediately(this.currentGPS.lat, this.currentGPS.lon);
+          
+          this.lastUpdateTime = Date.now();
+          return;
+        }
+        
+        // For subsequent updates, check if GPS coordinates have actually changed
+        const hasChanged = this.redisGPS.hasGPSChanged(gpsData.current, this.currentGPS);
         if (!hasChanged) {
           // Don't log unchanged coordinates to reduce noise
           this.stopTramMovement();
           return;
         }
         
-        // GPS has changed - update tram position
-        // Check if we need to create synthetic previous GPS for smooth movement
-        if (!this.currentGPS) {
-          // First time - set both current and previous
-          this.currentGPS = gpsData.current;
-          this.previousGPS = gpsData.previous || gpsData.current;
-        } else {
-          // Update: current becomes previous, new current from data
-          this.previousGPS = { ...this.currentGPS };
-          this.currentGPS = gpsData.current;
-        }
+        // GPS has changed - update tram position with smooth movement
+        this.previousGPS = { ...this.currentGPS };
+        this.currentGPS = gpsData.current;
         
         // Update tram position with smooth movement
         this.updateTramPosition();
@@ -128,7 +131,7 @@ class TramMovement {
           });
         }
       } else {
-        console.warn('⚠️ Incomplete GPS data from Redis - keeping tram stationary');
+        console.warn('⚠️ No current GPS data from Redis - keeping tram stationary');
         this.stopTramMovement();
       }
       
@@ -136,6 +139,26 @@ class TramMovement {
       console.error('❌ Failed to update tram position from Redis:', error);
       this.stopTramMovement();
     }
+  }
+
+  // Position tram immediately at GPS coordinates (for initial loading)
+  positionTramImmediately(lat, lon) {
+    if (!this.tram) return;
+    
+    const position = this.calculatePosition(lat, lon);
+    
+    // Set position directly without animation
+    this.tram.position.set(position.x, position.y, position.z);
+    
+    // Store last known position for fallback
+    this.lastKnownPosition = position;
+    
+    console.log('📍 Tram positioned immediately at:', {
+      lat: lat.toFixed(6),
+      lon: lon.toFixed(6),
+      x: position.x.toFixed(2),
+      z: position.z.toFixed(2)
+    });
   }
 
   updateTramPosition() {

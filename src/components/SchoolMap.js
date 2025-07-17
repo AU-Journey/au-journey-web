@@ -5,17 +5,8 @@ import {
   AmbientLight,
   DirectionalLight,
   PCFSoftShadowMap,
-  MeshBasicMaterial,
-  SphereGeometry,
-  Mesh,
   Vector3,
-  BufferGeometry,
-  LineBasicMaterial,
-  Line,
-  CylinderGeometry,
   Box3,
-  Raycaster,
-  Vector2,
   MathUtils,
   DoubleSide
 } from 'three';
@@ -52,7 +43,7 @@ class SchoolMap {
 
     this.init();
 
-    // GPS route points from config
+    // GPS route points from config (kept for fallback purposes only)
     this.gpsPoints = gpsRoute;
   }
 
@@ -67,8 +58,7 @@ class SchoolMap {
     this.renderer.powerPreference = "high-performance";
     this.container.appendChild(this.renderer.domElement);
 
-    // Camera setup: focus near tram start
-    // We'll set the camera after tram is loaded, but set a reasonable default here
+    // Camera setup: focus on a central area
     this.camera.position.set(0, 20, 50);
     this.camera.lookAt(0, 0, 0);
 
@@ -103,13 +93,10 @@ class SchoolMap {
     this.controls.minDistance = 20; // Prevent zooming too close
     this.controls.maxDistance = 200; // Prevent zooming too far
 
-    // Setup click handler for coordinate detection
-    this.setupClickHandler();
-
     // Load models
     this.loadMapModel();
 
-    // Load tram model and place at first GPS point
+    // Load tram model and let it position itself based on Redis data
     this.loadTramFBXModel();
 
     // Start animation loop
@@ -117,24 +104,6 @@ class SchoolMap {
 
     // Handle window resize
     window.addEventListener('resize', this.onWindowResize.bind(this));
-  }
-
-  // GPS to 3D coordinate conversion (without offset - GPS dots should be positioned correctly)
-  gpsTo3DCoords(lat, lon) {
-    // Calculate center point of GPS coordinates for better positioning
-    const firstPoint = this.gpsPoints[0];
-    const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
-    const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
-    const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
-    
-    // Use the same scale as dots for consistency
-    const scale = 100000;
-    
-    return {
-      x: (lat - centerLat) * scale,
-      y: 2, // Keep slightly above ground
-      z: (lon - centerLon) * scale
-    };
   }
 
   loadMapModel() {
@@ -152,7 +121,7 @@ class SchoolMap {
         this.mapModel.rotation.y = MathUtils.degToRad(165);
         this.mapModel.position.set(-300, 0, 220);
 
-        // --- Grass/transparent material fix ---
+        // Fix grass/transparent material
         this.mapModel.traverse((child) => {
           if (child.isMesh && child.material) {
             // If the material is transparent (likely grass), apply fixes
@@ -165,16 +134,11 @@ class SchoolMap {
             child.castShadow = true;
           }
         });
-        // --- End fix ---
 
         this.scene.add(this.mapModel);
 
         // Hide loading UI after map is loaded
         if (this.loadingUI) this.loadingUI.hide();
-
-        this.addGPSDots();
-        this.addRouteVisualization();
-        this.addTramStopIndicators();
       },
       undefined,
       (error) => {
@@ -182,161 +146,6 @@ class SchoolMap {
       }
     );
   }
-
-  addGPSDots() {
-    const material = new MeshBasicMaterial({
-      color: 0xff0000,
-      transparent: true,
-      opacity: 0.8
-    });
-    // Reduce point size for red dots
-    const geometry = new SphereGeometry(2, 10, 10);
-
-    // Add first and last points with different colors
-    const firstPoint = this.gpsPoints[0];
-    const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
-    
-    // Calculate center point of GPS coordinates for better positioning
-    const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
-    const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
-    
-    // Increase scale factor much more to make the path more visible
-    // Since GPS differences are around 0.003 degrees, we need a larger scale
-    const scale = 100000;
-    
-    // First point (blue)
-    const firstDot = new Mesh(
-      geometry,
-      new MeshBasicMaterial({ color: 0x0000ff, transparent: true, opacity: 0.8 })
-    );
-    const firstDotPos = {
-      x: (firstPoint.lat - centerLat) * scale,
-      y: 4,
-      z: (firstPoint.lon - centerLon) * scale
-    };
-    firstDot.position.set(firstDotPos.x, firstDotPos.y, firstDotPos.z);
-    this.scene.add(firstDot);
-    
-    // Last point (green)
-    const lastDot = new Mesh(
-      geometry,
-      new MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 })
-    );
-    lastDot.position.set(
-      (lastPoint.lat - centerLat) * scale,
-      4,
-      (lastPoint.lon - centerLon) * scale
-    );
-    this.scene.add(lastDot);
-
-    // Add remaining points
-    this.gpsPoints.forEach((gps, i) => {
-      if (i === 0 || i === this.gpsPoints.length - 1) return;
-      
-      const dot = new Mesh(geometry, material);
-      dot.position.set(
-        (gps.lat - centerLat) * scale,
-        2,
-        (gps.lon - centerLon) * scale
-      );
-      dot.name = `gps-dot-${i}`;
-      this.scene.add(dot);
-    });
-
-
-  }
-
-  addRouteVisualization() {
-    // Use same positioning logic as GPS dots - no offset needed
-    const firstPoint = this.gpsPoints[0];
-    const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
-    const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
-    const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
-    const scale = 100000;
-
-    const points = this.gpsPoints.map(gps => {
-      return new Vector3(
-        (gps.lat - centerLat) * scale,
-        1.5, // Slightly above dots
-        (gps.lon - centerLon) * scale
-      );
-    });
-
-    const geometry = new BufferGeometry().setFromPoints(points);
-    const material = new LineBasicMaterial({ 
-      color: 0x00ff00, 
-      linewidth: 2,
-      transparent: true,
-      opacity: 0.7
-    });
-
-    const line = new Line(geometry, material);
-    line.name = 'route-line';
-    this.scene.add(line);
-  }
-  
-  // Add visual indicators for tram stops
-  addTramStopIndicators() {
-    const stops = this.tramTracker.getBuildings();
-    
-    // Use same positioning logic as GPS dots
-    const firstPoint = this.gpsPoints[0];
-    const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
-    const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
-    const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
-    const scale = 100000;
-    
-    stops.forEach((stop, index) => {
-      // Create stop indicator with distinctive appearance
-      const geometry = new CylinderGeometry(4, 4, 8, 8);
-      const material = new MeshBasicMaterial({
-        color: 0xffd700, // Gold color for stops
-        transparent: true,
-        opacity: 0.9
-      });
-      
-      const stopIndicator = new Mesh(geometry, material);
-      
-      // Position using same coordinate system
-      const position = {
-        x: (stop.lat - centerLat) * scale,
-        y: 6, // Higher than GPS dots
-        z: (stop.lon - centerLon) * scale
-      };
-      
-      stopIndicator.position.set(position.x, position.y, position.z);
-      stopIndicator.name = `stop-${stop.id}`;
-      this.scene.add(stopIndicator);
-      
-      // Add stop label
-      this.addStopLabel(stop, position);
-      
-    });
-  }
-  
-  // Add text labels for tram stops (simplified version)
-  addStopLabel(stop, position) {
-    // Create a simple text representation using a colored sphere
-    const labelGeometry = new SphereGeometry(1.5, 8, 8);
-    const labelMaterial = new MeshBasicMaterial({
-      color: 0xff6600, // Orange for labels
-      transparent: true,
-      opacity: 0.8
-    });
-    
-    const label = new Mesh(labelGeometry, labelMaterial);
-    label.position.set(position.x, position.y + 5, position.z);
-    label.name = `label-${stop.id}`;
-    this.scene.add(label);
-    
-    // Store stop info for potential interaction
-    label.userData = {
-      stopName: stop.displayName,
-      stopId: stop.id
-    };
-  }
-
-
 
   onWindowResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -365,86 +174,7 @@ class SchoolMap {
     // Update tram tracking if tram is moving
     this.updateTramTracking();
     
-    // Update target indicator
-    this.updateTargetIndicator();
-    
     this.renderer.render(this.scene, this.camera);
-  }
-
-
-
-  // Add target indicator to show which GPS point tram is moving towards
-  addTargetIndicator() {
-    const geometry = new SphereGeometry(3, 8, 8);
-    const material = new MeshBasicMaterial({ 
-      color: 0xffff00, 
-      transparent: true, 
-      opacity: 0.8,
-      wireframe: true
-    });
-    
-    this.targetIndicator = new Mesh(geometry, material);
-    this.targetIndicator.name = 'target-indicator';
-    this.scene.add(this.targetIndicator);
-    
-    // Initially hide it
-    this.targetIndicator.visible = false;
-  }
-
-  // Update target indicator position
-  updateTargetIndicator() {
-    if (!this.tramMovement || !this.targetIndicator) return;
-    
-    const progress = this.tramMovement.getProgress();
-    
-    // In real-time mode, show current GPS position as target
-    if (progress.realTimeMode && progress.currentGPS) {
-      // Use same positioning as GPS dots
-      const firstPoint = this.gpsPoints[0];
-      const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
-      const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
-      const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
-      const scale = 100000;
-      
-      const targetPos = {
-        x: (progress.currentGPS.lat - centerLat) * scale,
-        y: 6, // Higher than other dots
-        z: (progress.currentGPS.lon - centerLon) * scale
-      };
-      
-      this.targetIndicator.position.set(targetPos.x, targetPos.y, targetPos.z);
-      this.targetIndicator.visible = true;
-      
-      // Change color to indicate real-time mode
-      if (this.targetIndicator.material) {
-        this.targetIndicator.material.color.setHex(0x00ffff); // Cyan for real-time
-      }
-    } else if (progress.isMoving && progress.currentIndex < this.gpsPoints.length) {
-      // Fallback mode - use static GPS points
-      const targetGPS = this.gpsPoints[progress.currentIndex];
-      
-      const firstPoint = this.gpsPoints[0];
-      const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
-      const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
-      const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
-      const scale = 100000;
-      
-      const targetPos = {
-        x: (targetGPS.lat - centerLat) * scale,
-        y: 6, // Higher than other dots
-        z: (targetGPS.lon - centerLon) * scale
-      };
-      
-      this.targetIndicator.position.set(targetPos.x, targetPos.y, targetPos.z);
-      this.targetIndicator.visible = true;
-      
-      // Change color to indicate fallback mode
-      if (this.targetIndicator.material) {
-        this.targetIndicator.material.color.setHex(0xffff00); // Yellow for fallback
-      }
-    } else {
-      this.targetIndicator.visible = false;
-    }
   }
 
   // Method to update tram position from live GPS (legacy method - Redis is now primary)
@@ -467,7 +197,7 @@ class SchoolMap {
   }
 
   // Initialize tram movement system
-  initializeTramMovement() {
+  async initializeTramMovement() {
     if (!this.tram) {
       console.warn('Cannot initialize tram movement: tram model not loaded');
       return;
@@ -488,17 +218,23 @@ class SchoolMap {
       redisConfig
     );
     
-    // Add current target indicator
-    this.addTargetIndicator();
-    
     console.log('🚊 TramMovement initialized with Redis integration');
+    
+    // Wait a moment for initial positioning to complete
+    setTimeout(() => {
+      if (this.tramMovement && this.tramMovement.lastKnownPosition) {
+        this.focusCameraOnTram();
+        this.cameraFocused = true;
+        console.log('📷 Initial camera focus completed');
+      }
+    }, 2000); // Give time for Redis data to arrive and position tram
   }
 
   loadTramFBXModel() {
     const loader = new FBXLoader();
     const baseUrl = import.meta.env.BASE_URL || '/';
     const modelPath = `${baseUrl}models/Tram.fbx`;
-    loader.load(modelPath, (object) => {
+    loader.load(modelPath, async (object) => {
       this.tram = object;
       // Center and scale tram model
       const bbox = new Box3().setFromObject(this.tram);
@@ -516,20 +252,9 @@ class SchoolMap {
       const uniformScale = (scale.x + scale.y + scale.z) / 3;
       this.tram.scale.set(uniformScale, uniformScale, uniformScale);
 
-      // Place at first GPS point (same as blue dot)
-      const firstPoint = this.gpsPoints[0];
-      const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
-      const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
-      const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
-      const coordScale = 100000;
-      const pos = {
-        x: (firstPoint.lat - centerLat) * coordScale,
-        y: -0.3, // Lowered from 4 to 2 to sit on the ground
-        z: (firstPoint.lon - centerLon) * coordScale
-      };
-      this.tram.position.set(pos.x, pos.y, pos.z);
-      // Rotate tram 180 degrees around Y axis for correct forward direction
-      this.tram.rotation.y = Math.PI;
+      // Don't position tram at fixed location - let TramMovement handle positioning via Redis
+      this.tram.position.set(0, -0.3, 0); // Temporary position until Redis data arrives
+      this.tram.rotation.y = Math.PI; // Rotate tram 180 degrees for correct forward direction
 
       // Remove forced yellow material: do not override child.material
       this.tram.traverse((child) => {
@@ -541,16 +266,26 @@ class SchoolMap {
 
       this.scene.add(this.tram);
       this.renderer.shadowMap.needsUpdate = true;
-      this.focusCameraOnTram();
-      this.initializeTramMovement();
+      
+      // Initialize tram movement first, then focus camera after GPS data arrives
+      await this.initializeTramMovement();
+      
+      // Focus camera on a reasonable default position initially
+      this.camera.position.set(0, 30, 60);
+      this.camera.lookAt(0, 0, 0);
+      if (this.controls) {
+        this.controls.target.set(0, 0, 0);
+        this.controls.update();
+      }
     }, undefined, (error) => {
       console.error('Error loading Tram.fbx:', error);
     });
   }
 
-  // After tram is loaded and positioned, set camera to focus near tram
+  // Focus camera on tram (called when tram position is updated)
   focusCameraOnTram() {
     if (!this.tram) return;
+    
     // Offset the camera to be above and behind the tram
     const offset = new Vector3(0, 30, 60); // Y: height, Z: behind
     const tramPos = this.tram.position.clone();
@@ -562,10 +297,6 @@ class SchoolMap {
       this.controls.update();
     }
   }
-  
-
-
-
 
   // Update tram tracking system continuously for Redis GPS data
   updateTramTracking() {
@@ -582,6 +313,13 @@ class SchoolMap {
       
       // Update debug UI if available
       this.updateDebugUI(progress.currentGPS, progress);
+      
+      // Focus camera on tram when GPS data is available (first time)
+      if (!this.cameraFocused && this.tramMovement.lastKnownPosition) {
+        this.focusCameraOnTram();
+        this.cameraFocused = true;
+        console.log('📷 Camera focused on tram at GPS position');
+      }
     } else if (progress.realTimeMode === false && this.gpsPoints && progress.currentIndex < this.gpsPoints.length) {
       // Fallback to static GPS points if Redis is unavailable
       const currentGPS = this.gpsPoints[progress.currentIndex];
@@ -629,81 +367,6 @@ class SchoolMap {
     if (this.tramTracker) {
       this.tramTracker.reset();
     }
-  }
-
-  // Setup click handler for coordinate detection
-  setupClickHandler() {
-    const raycaster = new Raycaster();
-    const mouse = new Vector2();
-    
-    this.renderer.domElement.addEventListener('click', (event) => {
-      // Prevent triggering when dragging camera
-      if (this.controls && this.controls.getDistance() !== this.controls.getDistance()) return;
-      
-      // Calculate mouse position in normalized device coordinates (-1 to +1)
-      const rect = this.renderer.domElement.getBoundingClientRect();
-      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      
-      // Cast ray from camera through mouse position
-      raycaster.setFromCamera(mouse, this.camera);
-      
-      // Find intersections with the map model
-      const intersects = raycaster.intersectObjects(this.scene.children, true);
-      
-      if (intersects.length > 0) {
-        const intersect = intersects[0];
-        const point = intersect.point;
-        
-        // Convert 3D coordinates back to GPS coordinates
-        const gpsCoords = this.threeDToGPS(point.x, point.z);
-        
-        // Add a temporary marker at the clicked position
-        this.addTemporaryMarker(point);
-      }
-    });
-  }
-  
-  // Convert 3D coordinates back to GPS coordinates
-  threeDToGPS(x, z) {
-    // Use same calculation parameters as the GPS to 3D conversion
-    const firstPoint = this.gpsPoints[0];
-    const lastPoint = this.gpsPoints[this.gpsPoints.length - 1];
-    const centerLat = (firstPoint.lat + lastPoint.lat) / 2;
-    const centerLon = (firstPoint.lon + lastPoint.lon) / 2;
-    const scale = 100000;
-    
-    return {
-      lat: (x / scale) + centerLat,
-      lon: (z / scale) + centerLon
-    };
-  }
-  
-  // Add temporary marker to show clicked position
-  addTemporaryMarker(position) {
-    // Remove previous temporary marker
-    const existingMarker = this.scene.getObjectByName('temp-marker');
-    if (existingMarker) {
-      this.scene.remove(existingMarker);
-    }
-    
-    // Create new marker
-    const geometry = new SphereGeometry(3, 8, 8);
-    const material = new MeshBasicMaterial({ 
-      color: 0xff00ff, 
-      transparent: true, 
-      opacity: 0.8 
-    });
-    
-    const marker = new Mesh(geometry, material);
-    marker.position.set(position.x, position.y + 5, position.z);
-    marker.name = 'temp-marker';
-    this.scene.add(marker);
-    
-    // Remove marker after 5 seconds
-    setTimeout(() => {
-      this.scene.remove(marker);
-    }, 5000);
   }
 
   // Dispose of resources and cleanup
