@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:vercel": "DEPLOY_TARGET=vercel vite build",
+    "build:github": "DEPLOY_TARGET=github vite build",
     "preview": "vite preview",
     "redis-proxy": "node redis-proxy-server.js",
     "test-redis": "node test-redis-connection.js",
