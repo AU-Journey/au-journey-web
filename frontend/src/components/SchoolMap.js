@@ -62,12 +62,12 @@ class SchoolMap {
     this.camera.position.set(0, 20, 50);
     this.camera.lookAt(0, 0, 0);
 
-    // Lighting setup
-    const ambientLight = new AmbientLight(0xffffff, 0.6);
+    // Lighting setup - brighter for better visibility
+    const ambientLight = new AmbientLight(0xffffff, 0.8); // Increased from 0.6 to 0.8
     this.scene.add(ambientLight);
     this.ambientLight = ambientLight; // Store reference for weather system
 
-    const directionalLight = new DirectionalLight(0xffffff, 0.8);
+    const directionalLight = new DirectionalLight(0xffffff, 1.0); // Increased from 0.8 to 1.0
     directionalLight.position.set(50, 100, 50);
     directionalLight.castShadow = true;
     directionalLight.shadow.mapSize.width = 2048;
@@ -81,6 +81,13 @@ class SchoolMap {
     directionalLight.shadow.camera.bottom = -100;
     this.scene.add(directionalLight);
     this.directionalLight = directionalLight; // Store reference for weather system
+
+    // Add additional fill light to brighten darker areas
+    const fillLight = new DirectionalLight(0xffffff, 0.3);
+    fillLight.position.set(-50, 50, -50); // Opposite direction to main light
+    fillLight.castShadow = false; // No shadows for fill light to reduce complexity
+    this.scene.add(fillLight);
+    this.fillLight = fillLight;
 
     // Initialize weather system
     this.weatherSystem = new WeatherSystem(this.scene, this.renderer);
@@ -141,12 +148,16 @@ class SchoolMap {
               child.material.depthWrite = true; // Enable depth writing for proper sorting
               child.material.side = DoubleSide;
               child.material.transparent = true;
-              child.material.opacity = 0.95; // Slightly reduce opacity to help with z-fighting
+              child.material.opacity = 0.98; // Increased opacity for better visibility
               
               // Prevent z-fighting by slightly adjusting polygon offset
               child.material.polygonOffset = true;
               child.material.polygonOffsetFactor = 1;
               child.material.polygonOffsetUnits = 1;
+            } else {
+              // For non-transparent materials, ensure they're fully opaque for better lighting
+              child.material.transparent = false;
+              child.material.opacity = 1.0;
             }
             
             // Apply material optimizations
@@ -205,12 +216,16 @@ class SchoolMap {
               child.material.depthWrite = true; // Enable depth writing for proper sorting
               child.material.side = DoubleSide;
               child.material.transparent = true;
-              child.material.opacity = 0.95; // Slightly reduce opacity to help with z-fighting
+              child.material.opacity = 0.98; // Increased opacity for better visibility
               
               // Prevent z-fighting by slightly adjusting polygon offset
               child.material.polygonOffset = true;
               child.material.polygonOffsetFactor = 1;
               child.material.polygonOffsetUnits = 1;
+            } else {
+              // For non-transparent materials, ensure they're fully opaque for better lighting
+              child.material.transparent = false;
+              child.material.opacity = 1.0;
             }
             
             // Apply material optimizations
@@ -244,32 +259,35 @@ class SchoolMap {
 
   // Apply scene optimizations specifically for the map
   optimizeMapScene() {
-    // Apply general scene optimizations
+    // Apply general scene optimizations from utility
     optimizeScene(this.scene);
     
-    // Update shadow map only when needed
+    // Ensure shadows are properly rendered for lighting
     this.renderer.shadowMap.needsUpdate = true;
     
     // Force matrix updates for static objects in both models
-    if (this.mapModel) {
-      this.mapModel.traverse((child) => {
-        if (child.userData.static) {
-          child.matrixAutoUpdate = false;
-          child.updateMatrix();
-        }
-      });
-    }
+    [this.mapModel, this.mapModel2].forEach(model => {
+      if (model) {
+        model.traverse((child) => {
+          if (child.userData.static) {
+            child.matrixAutoUpdate = false;
+            child.updateMatrix();
+          }
+          
+          // Ensure proper lighting for all meshes
+          if (child.isMesh && child.material) {
+            // Apply material optimizations from utility
+            optimizeMaterial(child.material);
+            
+            // Ensure shadows are enabled for better lighting
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+      }
+    });
     
-    if (this.mapModel2) {
-      this.mapModel2.traverse((child) => {
-        if (child.userData.static) {
-          child.matrixAutoUpdate = false;
-          child.updateMatrix();
-        }
-      });
-    }
-    
-    console.log('🎯 Scene optimizations applied');
+    //console.log('🎯 Scene optimizations applied with enhanced lighting');
   }
 
   onWindowResize() {

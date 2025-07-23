@@ -14,7 +14,7 @@ export function optimizeRenderer(renderer) {
   // Shadow optimizations
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = PCFSoftShadowMap;
-  renderer.shadowMap.autoUpdate = false; // Manual update only when needed
+  renderer.shadowMap.autoUpdate = true; // Keep auto-update enabled for proper lighting
   
   // Additional optimizations
   renderer.powerPreference = "high-performance";
@@ -24,18 +24,26 @@ export function optimizeRenderer(renderer) {
 }
 
 /**
- * Optimize material for better performance
+ * Optimize material for better performance and lighting
  * @param {Material} material - Three.js material
  */
 export function optimizeMaterial(material) {
-  // Reduce overdraw for transparent materials
+  // Handle transparent materials carefully for better visibility
   if (material.transparent) {
-    material.alphaTest = material.alphaTest || 0.5;
-    material.depthWrite = false;
+    material.alphaTest = material.alphaTest || 0.1; // Lower threshold for better grass visibility
+    material.depthWrite = material.alphaTest < 0.5; // Enable depth writing for better sorting
+  } else {
+    // Ensure opaque materials are fully opaque for better lighting
+    material.transparent = false;
+    material.opacity = 1.0;
+    material.depthWrite = true;
   }
   
-  // Enable frustum culling
+  // Enable frustum culling for performance
   material.frustumCulled = true;
+  
+  // Ensure proper lighting calculation
+  material.needsUpdate = true;
 }
 
 /**
