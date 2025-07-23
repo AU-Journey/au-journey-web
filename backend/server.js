@@ -1,18 +1,24 @@
-// Redis HTTP Proxy Server
-// This server connects to your Redis database and provides HTTP endpoints for browser access
-
+// Production server for DigitalOcean deployment
 import express from 'express';
 import Redis from 'ioredis';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 // Enable CORS for all routes
 app.use(cors());
 app.use(express.json());
 
-// Redis configuration - use your actual Redis credentials
+// Serve static files from dist directory
+app.use(express.static(path.join(__dirname, 'dist')));
+
+// Redis configuration - use environment variables in production
 const redisConfig = {
   host: process.env.REDIS_HOST || 'redis-15238.crce178.ap-east-1-1.ec2.redns.redis-cloud.com',
   port: parseInt(process.env.REDIS_PORT) || 15238,
@@ -25,7 +31,7 @@ const redisConfig = {
   lazyConnect: true
 };
 
-console.log('🔧 Starting Redis HTTP Proxy Server...');
+console.log('🔧 Starting AU Journey Web Server...');
 console.log('📍 Redis Config:', {
   host: redisConfig.host,
   port: redisConfig.port,
@@ -67,18 +73,16 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// API Routes
 // Get GPS data from Redis
 app.get('/api/redis/gps_data', async (req, res) => {
   try {
     console.log('📍 Fetching GPS data from Redis...');
     
-    // Fetch the GPS data from Redis
     const result = await redis.get('gps_data');
     
     if (result) {
       const gpsData = JSON.parse(result);
-      console.log('📍 GPS data retrieved:', gpsData);
-      
       res.json(gpsData);
     } else {
       console.warn('⚠️ No GPS data found in Redis');
@@ -96,7 +100,7 @@ app.get('/api/redis/gps_data', async (req, res) => {
   }
 });
 
-// Set GPS data in Redis (for testing)
+// Set GPS data in Redis
 app.post('/api/redis/gps_data', async (req, res) => {
   try {
     const gpsData = req.body;
@@ -175,16 +179,27 @@ app.get('/api/redis/keys', async (req, res) => {
   }
 });
 
+// Serve frontend for all other routes (SPA support)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
 // Start server
-app.listen(PORT, () => {
-  console.log(`🌐 Redis HTTP Proxy Server running on http://localhost:${PORT}`);
-  console.log(`📍 GPS endpoint: http://localhost:${PORT}/api/redis/gps_data`);
-  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🌐 AU Journey Web Server running on http://0.0.0.0:${PORT}`);
+  console.log(`📍 GPS endpoint: http://0.0.0.0:${PORT}/api/redis/gps_data`);
+  console.log(`🏥 Health check: http://0.0.0.0:${PORT}/health`);
 });
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
-  console.log('\n🛑 Shutting down Redis HTTP Proxy Server...');
+  console.log('\n🛑 Shutting down AU Journey Web Server...');
+  await redis.disconnect();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('\n🛑 Received SIGTERM, shutting down AU Journey Web Server...');
   await redis.disconnect();
   process.exit(0);
 }); 

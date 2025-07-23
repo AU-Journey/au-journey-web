@@ -1,0 +1,63 @@
+# Dependencies
+node_modules
+*/node_modules
+npm-debug.log*
+yarn-debug.log*
+
+# Development files
+.git
+.gitignore
+*.log
+.env
+.env.*
+.DS_Store
+**/.DS_Store
+
+# Development tools
+.vscode
+.idea
+coverage
+.cache
+
+# Build output
+frontend/dist
+backend/dist
+*/dist
+dist/
+build/
+*/build/
+
+# Documentation (unless needed in container)
+docs/
+*.md
+!README.md
+
+# Scripts and tests
+scripts/
+tests/
+
+# Version control
+.git/
+.gitignore
+
+# Deployment platforms
+.vercel/
+vercel.json
+
+# Migration and setup scripts
+migrate-structure.sh
+
+# Logs and cache
+*.log
+.cache/
+.vscode/
+.idea/
+
+# OS files  
+.DS_Store
+Thumbs.db
+
+# Redis data (if running locally)
+redis-data/
+*.rdb
+dump.rdb
