@@ -29,6 +29,7 @@ class SchoolMap {
     this.renderer = new WebGLRenderer({ antialias: true });
     this.controls = null;
     this.mapModel = null;
+    this.mapModel2 = null; // Add reference for school_map2.glb
     this.tramMovement = null;
     this.weatherSystem = null;
     this.weatherDisplay = null;
@@ -101,6 +102,7 @@ class SchoolMap {
 
     // Load models
     this.loadMapModel();
+    this.loadMapModel2(); // Load school_map2.glb
 
     // Load tram model and let it position itself based on Redis data
     this.loadTramFBXModel();
@@ -116,7 +118,9 @@ class SchoolMap {
     const loader = new GLTFLoader();
     
     const baseUrl = import.meta.env.BASE_URL || '/';
-    const modelPath = `${baseUrl}models/school_map.glb`;
+    // Add cache-busting parameter to prevent browser caching issues
+    const cacheBuster = typeof __MODEL_CACHE_BUST__ !== 'undefined' ? __MODEL_CACHE_BUST__ : Date.now();
+    const modelPath = `${baseUrl}models/school_map.glb?v=${cacheBuster}`;
     
     loader.load(modelPath, 
       (gltf) => {
@@ -174,6 +178,70 @@ class SchoolMap {
     );
   }
 
+  loadMapModel2() {
+    const loader = new GLTFLoader();
+    
+    const baseUrl = import.meta.env.BASE_URL || '/';
+    // Add cache-busting parameter to prevent browser caching issues
+    const cacheBuster = typeof __MODEL_CACHE_BUST__ !== 'undefined' ? __MODEL_CACHE_BUST__ : Date.now();
+    const modelPath = `${baseUrl}models/school_map2.glb?v=${cacheBuster}`;
+    
+    loader.load(modelPath, 
+      (gltf) => {
+        this.mapModel2 = gltf.scene;
+        
+        // Set calibrated position, rotation, and scale
+        this.mapModel2.scale.set(0.908, 0.908, 0.908);
+        this.mapModel2.rotation.y = MathUtils.degToRad(165);
+        this.mapModel2.position.set(-300, 0, 220);
+
+        // Fix grass/transparent material and apply optimizations
+        this.mapModel2.traverse((child) => {
+          if (child.isMesh && child.material) {
+            // Enhanced grass/transparent material fix
+            if (child.material.transparent || (child.material.map && child.material.alphaMap)) {
+              // Improved grass rendering to prevent glitching
+              child.material.alphaTest = 0.1; // Lower threshold for better grass visibility
+              child.material.depthWrite = true; // Enable depth writing for proper sorting
+              child.material.side = DoubleSide;
+              child.material.transparent = true;
+              child.material.opacity = 0.95; // Slightly reduce opacity to help with z-fighting
+              
+              // Prevent z-fighting by slightly adjusting polygon offset
+              child.material.polygonOffset = true;
+              child.material.polygonOffsetFactor = 1;
+              child.material.polygonOffsetUnits = 1;
+            }
+            
+            // Apply material optimizations
+            optimizeMaterial(child.material);
+            
+            // Shadow settings
+            child.receiveShadow = true;
+            child.castShadow = true;
+            
+            // Mark static objects for performance
+            if (!child.name.includes('dynamic') && !child.name.includes('animated')) {
+              child.userData.static = true;
+            }
+          }
+        });
+
+        this.scene.add(this.mapModel2);
+        
+        // Apply scene optimizations after adding the model
+        this.optimizeMapScene();
+
+        // Hide loading UI after map is loaded
+        if (this.loadingUI) this.loadingUI.hide();
+      },
+      undefined,
+      (error) => {
+        console.error('Error loading map model:', error);
+      }
+    );
+  }
+
   // Apply scene optimizations specifically for the map
   optimizeMapScene() {
     // Apply general scene optimizations
@@ -182,9 +250,18 @@ class SchoolMap {
     // Update shadow map only when needed
     this.renderer.shadowMap.needsUpdate = true;
     
-    // Force matrix updates for static objects
+    // Force matrix updates for static objects in both models
     if (this.mapModel) {
       this.mapModel.traverse((child) => {
+        if (child.userData.static) {
+          child.matrixAutoUpdate = false;
+          child.updateMatrix();
+        }
+      });
+    }
+    
+    if (this.mapModel2) {
+      this.mapModel2.traverse((child) => {
         if (child.userData.static) {
           child.matrixAutoUpdate = false;
           child.updateMatrix();
@@ -449,6 +526,9 @@ class SchoolMap {
     // Dispose map model properly
     if (this.mapModel) {
       disposeObject(this.mapModel);
+    }
+    if (this.mapModel2) {
+      disposeObject(this.mapModel2);
     }
     
     // Dispose tram model properly
