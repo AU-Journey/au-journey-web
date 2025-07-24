@@ -19,7 +19,10 @@ import WeatherSystem from './WeatherSystem.js';
 import WeatherDisplay from './WeatherDisplay.js';
 import TramTracker from './TramTracker.js';
 import { gpsRoute } from '../config/gpsRoute.js';
-import { optimizeRenderer, optimizeMaterial, optimizeScene, disposeObject } from '../utils/renderingOptimizations.js';
+import { optimizeRenderer, optimizeMaterial, optimizeScene, disposeObject, updateDistanceCulling } from '../utils/renderingOptimizations.js';
+import PerformanceMonitor from '../utils/PerformanceMonitor.js';
+import MapManager from './MapManager.js';
+import MemoryManager from '../utils/MemoryManager.js';
 
 class SchoolMap {
   constructor(container) {
@@ -28,16 +31,34 @@ class SchoolMap {
     this.camera = new PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     this.renderer = new WebGLRenderer({ antialias: true });
     this.controls = null;
-    this.mapModel = null;
-    this.mapModel2 = null; // Add reference for school_map2.glb
+    this.mapManager = new MapManager(this.scene);
     this.tramMovement = null;
     this.weatherSystem = null;
     this.weatherDisplay = null;
     this.tramTracker = null;
     
+    // Performance monitoring
+    this.performanceMonitor = new PerformanceMonitor();
+    
+    // Memory management
+    this.memoryManager = new MemoryManager();
+    this.setupMemoryManagement();
+    
+    // Make memory manager available to other components
+    this.scene.userData.memoryManager = this.memoryManager;
+    
     // Debug UI throttling
     this.lastDebugUpdate = 0;
     this.debugUpdateInterval = 1000; // 1 second
+    
+    // Frame counting for optimizations
+    this.frameCount = 0;
+    
+    // Update throttling for performance
+    this.lastWeatherUpdate = 0;
+    this.lastTramUpdate = 0;
+    this.weatherUpdateInterval = 5000; // 5 seconds
+    this.tramUpdateInterval = 100; // 100ms for smooth tram movement
 
     // Loading UI
     this.loadingUI = new LoadingUI();
@@ -70,15 +91,23 @@ class SchoolMap {
     const directionalLight = new DirectionalLight(0xffffff, 1.0); // Increased from 0.8 to 1.0
     directionalLight.position.set(50, 100, 50);
     directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.width = 2048;
-    directionalLight.shadow.mapSize.height = 2048;
+    
+    // Optimized shadow settings for better performance
+    const shadowMapSize = this.getOptimalShadowMapSize();
+    directionalLight.shadow.mapSize.width = shadowMapSize;
+    directionalLight.shadow.mapSize.height = shadowMapSize;
+    
     // Optimize shadow camera for better performance
     directionalLight.shadow.camera.near = 0.1;
-    directionalLight.shadow.camera.far = 500;
-    directionalLight.shadow.camera.left = -100;
-    directionalLight.shadow.camera.right = 100;
-    directionalLight.shadow.camera.top = 100;
-    directionalLight.shadow.camera.bottom = -100;
+    directionalLight.shadow.camera.far = 300; // Reduced from 500
+    directionalLight.shadow.camera.left = -80; // Reduced from -100
+    directionalLight.shadow.camera.right = 80; // Reduced from 100
+    directionalLight.shadow.camera.top = 80; // Reduced from 100
+    directionalLight.shadow.camera.bottom = -80; // Reduced from -100
+    
+    // Additional shadow optimizations
+    directionalLight.shadow.bias = -0.0001;
+    directionalLight.shadow.normalBias = 0.02;
     this.scene.add(directionalLight);
     this.directionalLight = directionalLight; // Store reference for weather system
 
@@ -107,9 +136,8 @@ class SchoolMap {
     this.controls.minDistance = 20; // Prevent zooming too close
     this.controls.maxDistance = 200; // Prevent zooming too far
 
-    // Load models
-    this.loadMapModel();
-    this.loadMapModel2(); // Load school_map2.glb
+    // Register and load maps with the MapManager
+    this.initializeMaps();
 
     // Load tram model and let it position itself based on Redis data
     this.loadTramFBXModel();
@@ -119,145 +147,96 @@ class SchoolMap {
 
     // Handle window resize
     window.addEventListener('resize', this.onWindowResize.bind(this));
-  }
-
-  loadMapModel() {
-    const loader = new GLTFLoader();
     
-    const baseUrl = import.meta.env.BASE_URL || '/';
-    // Add cache-busting parameter to prevent browser caching issues
-    const cacheBuster = typeof __MODEL_CACHE_BUST__ !== 'undefined' ? __MODEL_CACHE_BUST__ : Date.now();
-    const modelPath = `${baseUrl}models/school_map.glb?v=${cacheBuster}`;
-    
-    loader.load(modelPath, 
-      (gltf) => {
-        this.mapModel = gltf.scene;
-        
-        // Set calibrated position, rotation, and scale
-        this.mapModel.scale.set(0.908, 0.908, 0.908);
-        this.mapModel.rotation.y = MathUtils.degToRad(165);
-        this.mapModel.position.set(-300, 0, 220);
-
-        // Fix grass/transparent material and apply optimizations
-        this.mapModel.traverse((child) => {
-          if (child.isMesh && child.material) {
-            // Enhanced grass/transparent material fix
-            if (child.material.transparent || (child.material.map && child.material.alphaMap)) {
-              // Improved grass rendering to prevent glitching
-              child.material.alphaTest = 0.1; // Lower threshold for better grass visibility
-              child.material.depthWrite = true; // Enable depth writing for proper sorting
-              child.material.side = DoubleSide;
-              child.material.transparent = true;
-              child.material.opacity = 0.98; // Increased opacity for better visibility
-              
-              // Prevent z-fighting by slightly adjusting polygon offset
-              child.material.polygonOffset = true;
-              child.material.polygonOffsetFactor = 1;
-              child.material.polygonOffsetUnits = 1;
-            } else {
-              // For non-transparent materials, ensure they're fully opaque for better lighting
-              child.material.transparent = false;
-              child.material.opacity = 1.0;
-            }
-            
-            // Apply material optimizations
-            optimizeMaterial(child.material);
-            
-            // Shadow settings
-            child.receiveShadow = true;
-            child.castShadow = true;
-            
-            // Mark static objects for performance
-            if (!child.name.includes('dynamic') && !child.name.includes('animated')) {
-              child.userData.static = true;
-            }
-          }
-        });
-
-        this.scene.add(this.mapModel);
-        
-        // Apply scene optimizations after adding the model
-        this.optimizeMapScene();
-
-        // Hide loading UI after map is loaded
-        if (this.loadingUI) this.loadingUI.hide();
-      },
-      undefined,
-      (error) => {
-        console.error('Error loading map model:', error);
+    // Add keyboard shortcut for performance monitor
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'p' || event.key === 'P') {
+        this.performanceMonitor.toggle();
       }
-    );
+    });
   }
 
-  loadMapModel2() {
-    const loader = new GLTFLoader();
+  async initializeMaps() {
+    try {
+      // Register both maps
+      this.mapManager.registerMap('school_map', 'school_map.glb');
+      this.mapManager.registerMap('school_map2', 'school_map2.glb');
+      
+      // Load both maps and add them to the scene
+      console.log('🗺️ Loading both map models...');
+      await this.mapManager.loadBothMaps('school_map', 'school_map2');
+      
+      // Apply scene optimizations after maps are loaded
+      this.optimizeMapScene();
+      
+      // Hide loading UI after maps are loaded
+      if (this.loadingUI) this.loadingUI.hide();
+      
+      // Add keyboard shortcuts for map control
+      window.addEventListener('keydown', (event) => {
+        if (event.key === 'm' || event.key === 'M') {
+          this.toggleMapVisibility();
+        }
+        if (event.key === '1') {
+          this.setMapVisibility('school_map', true);
+          this.setMapVisibility('school_map2', false);
+        }
+        if (event.key === '2') {
+          this.setMapVisibility('school_map', false);
+          this.setMapVisibility('school_map2', true);
+        }
+        if (event.key === '3') {
+          this.setMapVisibility('school_map', true);
+          this.setMapVisibility('school_map2', true);
+        }
+      });
+      
+      console.log('🗺️ Both maps loaded - Press M to toggle, 1/2/3 for specific maps');
+      
+    } catch (error) {
+      console.error('❌ Failed to initialize maps:', error);
+      // Hide loading UI even on error
+      if (this.loadingUI) this.loadingUI.hide();
+    }
+  }
+  
+  toggleMapVisibility() {
+    const maps = this.mapManager.getAllMaps();
+    const map1 = maps.get('school_map');
+    const map2 = maps.get('school_map2');
     
-    const baseUrl = import.meta.env.BASE_URL || '/';
-    // Add cache-busting parameter to prevent browser caching issues
-    const cacheBuster = typeof __MODEL_CACHE_BUST__ !== 'undefined' ? __MODEL_CACHE_BUST__ : Date.now();
-    const modelPath = `${baseUrl}models/school_map2.glb?v=${cacheBuster}`;
-    
-    loader.load(modelPath, 
-      (gltf) => {
-        this.mapModel2 = gltf.scene;
-        
-        // Set calibrated position, rotation, and scale
-        this.mapModel2.scale.set(0.908, 0.908, 0.908);
-        this.mapModel2.rotation.y = MathUtils.degToRad(165);
-        this.mapModel2.position.set(-300, 0, 220);
-
-        // Fix grass/transparent material and apply optimizations
-        this.mapModel2.traverse((child) => {
-          if (child.isMesh && child.material) {
-            // Enhanced grass/transparent material fix
-            if (child.material.transparent || (child.material.map && child.material.alphaMap)) {
-              // Improved grass rendering to prevent glitching
-              child.material.alphaTest = 0.1; // Lower threshold for better grass visibility
-              child.material.depthWrite = true; // Enable depth writing for proper sorting
-              child.material.side = DoubleSide;
-              child.material.transparent = true;
-              child.material.opacity = 0.98; // Increased opacity for better visibility
-              
-              // Prevent z-fighting by slightly adjusting polygon offset
-              child.material.polygonOffset = true;
-              child.material.polygonOffsetFactor = 1;
-              child.material.polygonOffsetUnits = 1;
-            } else {
-              // For non-transparent materials, ensure they're fully opaque for better lighting
-              child.material.transparent = false;
-              child.material.opacity = 1.0;
-            }
-            
-            // Apply material optimizations
-            optimizeMaterial(child.material);
-            
-            // Shadow settings
-            child.receiveShadow = true;
-            child.castShadow = true;
-            
-            // Mark static objects for performance
-            if (!child.name.includes('dynamic') && !child.name.includes('animated')) {
-              child.userData.static = true;
-            }
-          }
-        });
-
-        this.scene.add(this.mapModel2);
-        
-        // Apply scene optimizations after adding the model
-        this.optimizeMapScene();
-
-        // Hide loading UI after map is loaded
-        if (this.loadingUI) this.loadingUI.hide();
-      },
-      undefined,
-      (error) => {
-        console.error('Error loading map model:', error);
+    if (map1 && map2) {
+      // Toggle between: both visible → map1 only → map2 only → both visible
+      if (map1.model.visible && map2.model.visible) {
+        // Both visible → show only map1
+        map1.model.visible = true;
+        map2.model.visible = false;
+        console.log('🗺️ Showing only school_map');
+      } else if (map1.model.visible && !map2.model.visible) {
+        // Map1 only → show only map2
+        map1.model.visible = false;
+        map2.model.visible = true;
+        console.log('🗺️ Showing only school_map2');
+      } else {
+        // Map2 only or neither → show both
+        map1.model.visible = true;
+        map2.model.visible = true;
+        console.log('🗺️ Showing both maps');
       }
-    );
+    }
+  }
+  
+  setMapVisibility(mapId, visible) {
+    const maps = this.mapManager.getAllMaps();
+    const map = maps.get(mapId);
+    
+    if (map && map.model) {
+      map.model.visible = visible;
+      console.log(`🗺️ ${mapId} visibility set to ${visible}`);
+    }
   }
 
-  // Apply scene optimizations specifically for the map
+  // Apply scene optimizations specifically for the maps
   optimizeMapScene() {
     // Apply general scene optimizations from utility
     optimizeScene(this.scene);
@@ -265,10 +244,11 @@ class SchoolMap {
     // Ensure shadows are properly rendered for lighting
     this.renderer.shadowMap.needsUpdate = true;
     
-    // Force matrix updates for static objects in both models
-    [this.mapModel, this.mapModel2].forEach(model => {
-      if (model) {
-        model.traverse((child) => {
+    // Force matrix updates for static objects in all loaded maps
+    const allMaps = this.mapManager.getAllMaps();
+    for (const [mapId, mapData] of allMaps) {
+      if (mapData.model && mapData.loaded) {
+        mapData.model.traverse((child) => {
           if (child.userData.static) {
             child.matrixAutoUpdate = false;
             child.updateMatrix();
@@ -285,7 +265,7 @@ class SchoolMap {
           }
         });
       }
-    });
+    }
     
     //console.log('🎯 Scene optimizations applied with enhanced lighting');
   }
@@ -295,17 +275,92 @@ class SchoolMap {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
+  
+  getOptimalShadowMapSize() {
+    // Determine shadow map size based on device capabilities
+    const gl = this.renderer.getContext();
+    const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    
+    // Check for mobile devices or low-performance GPUs
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const devicePixelRatio = window.devicePixelRatio || 1;
+    
+    if (isMobile || devicePixelRatio < 2) {
+      return Math.min(1024, maxTextureSize); // Lower resolution for mobile
+    } else if (maxTextureSize >= 4096) {
+      return 2048; // Standard resolution for desktop
+    } else {
+      return 1024; // Fallback for older hardware
+    }
+  }
+  
+  setupMemoryManagement() {
+    // Set up memory event handlers
+    this.memoryManager.onMemoryEvent('warning', (data) => {
+      console.warn('⚠️ Memory Warning:', data.message);
+    });
+    
+    this.memoryManager.onMemoryEvent('critical', (data) => {
+      console.error('🚨 Critical Memory Usage:', data.message);
+      // Could trigger emergency cleanup here
+      this.performEmergencyCleanup();
+    });
+    
+    this.memoryManager.onMemoryEvent('leak', (data) => {
+      console.error('🕳️ Memory Leak Detected:', data.message);
+    });
+    
+    // Add keyboard shortcut for memory stats
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'i' || event.key === 'I') {
+        this.logMemoryStats();
+      }
+    });
+  }
+  
+  performEmergencyCleanup() {
+    console.log('🚨 Performing emergency cleanup...');
+    
+    // Force garbage collection if available
+    this.memoryManager.forceGarbageCollection();
+    
+    // Reduce shadow map size temporarily
+    if (this.directionalLight && this.directionalLight.shadow) {
+      this.directionalLight.shadow.mapSize.setScalar(512);
+      this.directionalLight.shadow.map?.dispose();
+      this.directionalLight.shadow.map = null;
+    }
+    
+    // Reduce weather update frequency
+    this.weatherUpdateInterval = 10000; // Increase to 10 seconds
+    
+    console.log('✅ Emergency cleanup completed');
+  }
+  
+  logMemoryStats() {
+    const stats = this.memoryManager.getStats();
+    console.log('📊 Memory Statistics:', stats);
+    
+    const perfStats = this.performanceMonitor?.stats;
+    if (perfStats) {
+      console.log('⚡ Performance Statistics:', perfStats);
+    }
+  }
 
   animate() {
     requestAnimationFrame(this.animate.bind(this));
+    
+    this.frameCount++;
     
     if (this.controls) {
       this.controls.update();
     }
     
-    // Update weather system
-    if (this.weatherSystem) {
-      this.weatherSystem.update(performance.now());
+    // Update weather system (throttled)
+    const currentTime = performance.now();
+    if (this.weatherSystem && currentTime - this.lastWeatherUpdate > this.weatherUpdateInterval) {
+      this.weatherSystem.update(currentTime);
+      this.lastWeatherUpdate = currentTime;
       
       // Update weather display
       if (this.weatherDisplay) {
@@ -314,8 +369,24 @@ class SchoolMap {
       }
     }
     
-    // Update tram tracking if tram is moving
-    this.updateTramTracking();
+    // Update tram tracking if tram is moving (throttled)
+    if (currentTime - this.lastTramUpdate > this.tramUpdateInterval) {
+      this.updateTramTracking();
+      this.lastTramUpdate = currentTime;
+    }
+    
+    // Apply distance-based culling for performance
+    updateDistanceCulling(this.camera, this.scene, this.frameCount);
+    
+    // Update performance monitor
+    if (this.performanceMonitor) {
+      this.performanceMonitor.update(this.renderer, this.scene, this.camera);
+    }
+    
+    // Update memory manager
+    if (this.memoryManager) {
+      this.memoryManager.update();
+    }
     
     this.renderer.render(this.scene, this.camera);
   }
@@ -541,17 +612,27 @@ class SchoolMap {
       this.weatherDisplay = null;
     }
     
-    // Dispose map model properly
-    if (this.mapModel) {
-      disposeObject(this.mapModel);
-    }
-    if (this.mapModel2) {
-      disposeObject(this.mapModel2);
+    // Dispose map manager and all maps
+    if (this.mapManager) {
+      this.mapManager.dispose();
+      this.mapManager = null;
     }
     
     // Dispose tram model properly
     if (this.tram) {
       disposeObject(this.tram);
+    }
+    
+    // Dispose performance monitor
+    if (this.performanceMonitor) {
+      this.performanceMonitor.dispose();
+      this.performanceMonitor = null;
+    }
+    
+    // Dispose memory manager
+    if (this.memoryManager) {
+      this.memoryManager.dispose();
+      this.memoryManager = null;
     }
     
     console.log('🧹 SchoolMap resources disposed');
