@@ -417,19 +417,18 @@ class SchoolMap {
       return;
     }
 
-    // Redis configuration - will use defaults in RedisGPSService
-    // In browser environment, this will use HTTP proxy automatically
-    const redisConfig = {
-      // Let RedisGPSService handle environment detection and defaults
+    // WebSocket GPS configuration
+    const gpsConfig = {
+      // WebSocketGPSService will handle environment detection and defaults
     };
 
-    // Create TramMovement instance with Redis integration
+    // Create TramMovement instance with WebSocket GPS integration
     this.tramMovement = new TramMovement(
       this.tram,
       null,
       this.gpsPoints, // Fallback GPS points
       new Vector3(0, 0, 0),
-      redisConfig
+      gpsConfig
     );
     
     console.log('🚊 TramMovement initialized with Redis integration');
@@ -521,15 +520,31 @@ class SchoolMap {
     }
   }
 
-  // Update tram tracking system continuously for Redis GPS data
+  // Update tram tracking system continuously for WebSocket GPS data
   updateTramTracking() {
     if (!this.tramMovement || !this.tramTracker || !this.tramMovement.tram) return;
     
-    // Get current tram progress (now includes Redis GPS data)
-    const progress = this.tramMovement.getProgress();
-    if (!progress) return;
+    // Get current tram progress (now includes WebSocket GPS data)
+    let progress;
+    try {
+      progress = this.tramMovement.getProgress();
+      if (!progress) return;
+    } catch (error) {
+      console.error('❌ Error getting tram progress:', error);
+      return;
+    }
     
-    // Use real-time GPS data from Redis if available
+    // Check WebSocket connection health
+    const isHealthy = progress.isConnectionHealthy;
+    if (!isHealthy && progress.lastConnectionLoss) {
+      // Show connection warning if disconnected for more than 10 seconds
+      const disconnectedTime = Date.now() - progress.lastConnectionLoss;
+      if (disconnectedTime > 10000) {
+        console.warn('⚠️ WebSocket connection lost for', Math.floor(disconnectedTime / 1000), 'seconds');
+      }
+    }
+
+    // Use real-time GPS data from WebSocket if available
     if (progress.currentGPS) {
       // Update local tracker with real-time GPS data
       this.tramTracker.updatePosition(progress.currentGPS.lat, progress.currentGPS.lon);
@@ -544,7 +559,7 @@ class SchoolMap {
         console.log('📷 Camera focused on tram at GPS position');
       }
     } else if (progress.realTimeMode === false && this.gpsPoints && progress.currentIndex < this.gpsPoints.length) {
-      // Fallback to static GPS points if Redis is unavailable
+      // Fallback to static GPS points if WebSocket is unavailable
       const currentGPS = this.gpsPoints[progress.currentIndex];
       if (currentGPS) {
         this.tramTracker.updatePosition(currentGPS.lat, currentGPS.lon);
@@ -568,7 +583,13 @@ class SchoolMap {
       // Prepare debug data
       const debugData = {
         frontendStatus: progress.isMoving ? 'Running' : 'Stopped',
-        position: currentGPS
+        position: currentGPS,
+        connectionStatus: {
+          state: progress.connectionState || 'unknown',
+          healthy: progress.isConnectionHealthy || false,
+          lastLoss: progress.lastConnectionLoss,
+          webSocketStatus: progress.webSocketStatus
+        }
       };
       
       // Update debug UI

@@ -4,11 +4,20 @@ import Redis from 'ioredis';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+const server = createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    methods: ["GET", "POST"]
+  }
+});
 const PORT = process.env.PORT || 3000;
 
 // Enable CORS for all routes
@@ -37,6 +46,12 @@ console.log('📍 Redis Config:', {
   port: redisConfig.port,
   db: redisConfig.db
 });
+
+// Broadcast GPS data to all connected WebSocket clients
+function broadcastGPSData(gpsData) {
+  io.emit('gps-data-update', gpsData);
+  console.log('📡 Broadcasted GPS data to', io.engine.clientsCount, 'connected clients');
+}
 
 // Create Redis client
 const redis = new Redis(redisConfig);
@@ -73,121 +88,95 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// API Routes
-// Get GPS data from Redis
-app.get('/api/redis/gps_data', async (req, res) => {
-  try {
-    console.log('📍 Fetching GPS data from Redis...');
-    
-    const result = await redis.get('gps_data');
-    
-    if (result) {
-      const gpsData = JSON.parse(result);
-      res.json(gpsData);
-    } else {
-      console.warn('⚠️ No GPS data found in Redis');
-      res.status(404).json({ 
-        error: 'No GPS data found',
-        message: 'gps_data key not found in Redis'
-      });
-    }
-  } catch (error) {
-    console.error('❌ Error fetching GPS data:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch GPS data',
-      message: error.message 
-    });
-  }
-});
-
-// Set GPS data in Redis
-app.post('/api/redis/gps_data', async (req, res) => {
-  try {
-    const gpsData = req.body;
-    
-    // Validate GPS data format
-    if (!gpsData.c || !gpsData.p) {
-      return res.status(400).json({
-        error: 'Invalid GPS data format',
-        message: 'Expected format: {"c": {...}, "p": {...}, "s": "active"}'
-      });
-    }
-    
-    // Store in Redis
-    await redis.set('gps_data', JSON.stringify(gpsData));
-    
-    console.log('📍 GPS data stored in Redis:', gpsData);
-    res.json({ 
-      success: true, 
-      message: 'GPS data stored successfully',
-      data: gpsData
-    });
-  } catch (error) {
-    console.error('❌ Error storing GPS data:', error);
-    res.status(500).json({ 
-      error: 'Failed to store GPS data',
-      message: error.message 
-    });
-  }
-});
-
-// Test endpoint to set sample GPS data
-app.post('/api/test/set-sample-gps', async (req, res) => {
-  try {
-    const sampleGPS = {
-      c: { 
-        lat: 13.612441, 
-        lon: 100.836478, 
-        t: new Date().toISOString() 
-      },
-      p: { 
-        lat: 13.612412, 
-        lon: 100.836585, 
-        t: new Date(Date.now() - 5000).toISOString() 
-      },
-      s: "active"
-    };
-    
-    await redis.set('gps_data', JSON.stringify(sampleGPS));
-    
-    console.log('🧪 Sample GPS data set:', sampleGPS);
-    res.json({ 
-      success: true, 
-      message: 'Sample GPS data set successfully',
-      data: sampleGPS
-    });
-  } catch (error) {
-    console.error('❌ Error setting sample GPS data:', error);
-    res.status(500).json({ 
-      error: 'Failed to set sample GPS data',
-      message: error.message 
-    });
-  }
-});
-
-// List all Redis keys (for debugging)
-app.get('/api/redis/keys', async (req, res) => {
-  try {
-    const keys = await redis.keys('*');
-    res.json({ keys });
-  } catch (error) {
-    console.error('❌ Error fetching Redis keys:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch Redis keys',
-      message: error.message 
-    });
-  }
-});
+// Note: All GPS functionality now handled via WebSocket events
+// REST API endpoints have been removed in favor of real-time WebSocket communication
 
 // Serve frontend for all other routes (SPA support)
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
+// WebSocket connection handling
+io.on('connection', (socket) => {
+  console.log('🔌 Client connected:', socket.id);
+  
+  // Send welcome message
+  socket.emit('welcome', {
+    message: 'Connected to AU Journey WebSocket server',
+    timestamp: new Date().toISOString()
+  });
+  
+  // Handle client disconnection
+  socket.on('disconnect', (reason) => {
+    console.log('🔌 Client disconnected:', socket.id, 'Reason:', reason);
+  });
+  
+  // Handle GPS data requests
+  socket.on('request-gps-data', async () => {
+    try {
+      const result = await redis.get('gps_data');
+      if (result) {
+        const gpsData = JSON.parse(result);
+        socket.emit('gps-data', gpsData);
+      } else {
+        socket.emit('gps-error', { 
+          error: 'No GPS data found',
+          message: 'gps_data key not found in Redis'
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error fetching GPS data for WebSocket:', error);
+      socket.emit('gps-error', { 
+        error: 'Failed to fetch GPS data',
+        message: error.message 
+      });
+    }
+  });
+  
+  // Handle GPS data updates from external sources
+  socket.on('update-gps-data', async (gpsData) => {
+    try {
+      // Validate GPS data format
+      if (!gpsData.c || !gpsData.p) {
+        socket.emit('gps-error', {
+          error: 'Invalid GPS data format',
+          message: 'Expected format: {"c": {...}, "p": {...}, "s": "active"}'
+        });
+        return;
+      }
+      
+      // Store in Redis
+      await redis.set('gps_data', JSON.stringify(gpsData));
+      
+      // Broadcast to all WebSocket clients
+      broadcastGPSData(gpsData);
+      
+      console.log('📍 GPS data updated via WebSocket:', gpsData);
+      socket.emit('gps-update-success', { 
+        success: true, 
+        message: 'GPS data updated successfully',
+        data: gpsData
+      });
+    } catch (error) {
+      console.error('❌ Error updating GPS data via WebSocket:', error);
+      socket.emit('gps-error', { 
+        error: 'Failed to update GPS data',
+        message: error.message 
+      });
+    }
+  });
+
+  // Handle ping for connection testing
+  socket.on('ping', () => {
+    socket.emit('pong', { timestamp: Date.now() });
+  });
+});
+
 // Start server
-app.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 AU Journey Web Server running on http://0.0.0.0:${PORT}`);
-  console.log(`📍 GPS endpoint: http://0.0.0.0:${PORT}/api/redis/gps_data`);
+  console.log(`🔌 WebSocket server ready for connections`);
+  console.log(`📍 GPS data: Real-time via WebSocket events`);
   console.log(`🏥 Health check: http://0.0.0.0:${PORT}/health`);
 });
 

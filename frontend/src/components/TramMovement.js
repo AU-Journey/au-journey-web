@@ -1,10 +1,10 @@
 // TramMovement.js
 import { Vector3 } from 'three';
 import gsap from 'gsap';
-import RedisGPSService from '../services/RedisGPSService.js';
+import WebSocketGPSService from '../services/WebSocketGPSService.js';
 
 class TramMovement {
-  constructor(tram, gpsTo3DCoords, gpsPoints = null, offset = new Vector3(0, 0, 0), redisConfig = {}) {
+  constructor(tram, gpsTo3DCoords, gpsPoints = null, offset = new Vector3(0, 0, 0), gpsConfig = {}) {
     this.tram = tram;
     this.offset = offset;
     this.isMoving = false;
@@ -15,8 +15,8 @@ class TramMovement {
     this.tramSpeed = 10; // Slower speed for realistic tram movement
     this.rotationSpeed = 1; // Slower rotation for smoother turning
     
-    // Redis GPS service
-    this.redisGPS = new RedisGPSService(redisConfig);
+    // GPS service - WebSocket only
+    this.webSocketGPS = new WebSocketGPSService(gpsConfig);
     
     // GPS tracking
     this.currentGPS = null;
@@ -45,6 +45,7 @@ class TramMovement {
     this.isRealTimeMode = true;
     this.lastKnownPosition = null;
     this.lastStaleWarning = 0;
+    this.lastConnectionLoss = null;
     
     // Start real-time GPS tracking
     this.startRealTimeTracking();
@@ -62,84 +63,131 @@ class TramMovement {
   async startRealTimeTracking() {
     if (!this.isRealTimeMode) return;
     
-    // Starting GPS tracking - immediate initial positioning
-    console.log('🚊 Starting real-time GPS tracking...');
+    console.log('🚊 Starting real-time GPS tracking with WebSocket...');
     
-    // Immediate initial positioning from Redis
-    await this.updateFromRedis();
-    
-    // Set up periodic updates
-    this.trackingInterval = setInterval(async () => {
-      if (this.isRealTimeMode) {
-        await this.updateFromRedis();
-      }
-    }, this.updateInterval);
+    // WebSocket event-driven approach
+    this.setupWebSocketTracking();
   }
-
-  async updateFromRedis() {
-    try {
-      const gpsData = await this.redisGPS.getBothGPSPoints();
+  
+  setupWebSocketTracking() {
+    console.log('🔌 Setting up WebSocket event-driven tracking...');
+    
+    // Subscribe to GPS updates
+    this.unsubscribeGPS = this.webSocketGPS.onGPSUpdate((gpsData) => {
+      this.handleGPSUpdate(gpsData);
+    });
+    
+    // Subscribe to connection changes
+    this.unsubscribeConnection = this.webSocketGPS.onConnectionChange((connected) => {
+      console.log('🔌 WebSocket connection status:', connected ? 'Connected' : 'Disconnected');
       
-      if (gpsData.current) {
-        // Check if GPS data is stale
-        const isStale = this.redisGPS.isGPSDataStale(gpsData.current.timestamp);
-        if (isStale) {
-          // Only log staleness once to avoid spam
-          if (!this.lastStaleWarning || Date.now() - this.lastStaleWarning > 30000) {
-            console.warn('⏰ GPS data is stale - keeping tram stationary');
-            this.lastStaleWarning = Date.now();
-          }
-          this.stopTramMovement();
-          return;
-        }
-        
-        // First time loading - position tram immediately at current GPS
-        if (!this.currentGPS) {
-          console.log('🎯 Initial tram positioning from Redis GPS');
-          this.currentGPS = gpsData.current;
-          this.previousGPS = gpsData.previous || gpsData.current;
-          
-          // Position tram immediately at current GPS location
-          this.positionTramImmediately(this.currentGPS.lat, this.currentGPS.lon);
-          
-          this.lastUpdateTime = Date.now();
-          return;
-        }
-        
-        // For subsequent updates, check if GPS coordinates have actually changed
-        const hasChanged = this.redisGPS.hasGPSChanged(gpsData.current, this.currentGPS);
-        if (!hasChanged) {
-          // Don't log unchanged coordinates to reduce noise
-          this.stopTramMovement();
-          return;
-        }
-        
-        // GPS has changed - update tram position with smooth movement
-        this.previousGPS = { ...this.currentGPS };
-        this.currentGPS = gpsData.current;
-        
-        // Update tram position with smooth movement
-        this.updateTramPosition();
-        
-        this.lastUpdateTime = Date.now();
-        
-        // Only log movement in development
-        if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-          console.log('📍 Tram moving to:', {
-            lat: this.currentGPS.lat.toFixed(6), 
-            lon: this.currentGPS.lon.toFixed(6)
-          });
-        }
+      if (!connected) {
+        console.log('⚠️ WebSocket disconnected, using simulation data...');
+        this.handleConnectionLoss();
       } else {
-        console.warn('⚠️ No current GPS data from Redis - keeping tram stationary');
+        console.log('✅ WebSocket reconnected, resuming real-time tracking');
+        this.handleConnectionRestored();
+      }
+    });
+    
+    // Subscribe to errors
+    this.unsubscribeError = this.webSocketGPS.onError((error) => {
+      console.warn('❌ WebSocket GPS error:', error);
+    });
+    
+    // Request initial GPS data
+    this.webSocketGPS.requestGPSData();
+  }
+  
+
+
+  handleGPSUpdate(gpsData) {
+    try {
+      if (gpsData.current) {
+        this.processGPSData(gpsData);
+      } else {
+        console.warn('⚠️ No current GPS data in WebSocket update');
         this.stopTramMovement();
       }
-      
     } catch (error) {
-      console.error('❌ Failed to update tram position from Redis:', error);
+      console.error('❌ Failed to handle GPS update:', error);
       this.stopTramMovement();
     }
   }
+  
+  async updateFromWebSocket() {
+    try {
+      const gpsData = await this.webSocketGPS.getBothGPSPoints();
+      this.processGPSData(gpsData);
+    } catch (error) {
+      console.error('❌ Failed to update from WebSocket service:', error);
+      this.stopTramMovement();
+    }
+  }
+  
+  processGPSData(gpsData) {
+    if (gpsData.current) {
+      // Check if GPS data is stale
+      const isStale = this.webSocketGPS.isGPSDataStale ? 
+        this.webSocketGPS.isGPSDataStale(gpsData.current.timestamp) : false;
+      
+      if (isStale) {
+        // Only log staleness once to avoid spam
+        if (!this.lastStaleWarning || Date.now() - this.lastStaleWarning > 30000) {
+          console.warn('⏰ GPS data is stale - keeping tram stationary');
+          this.lastStaleWarning = Date.now();
+        }
+        this.stopTramMovement();
+        return;
+      }
+      
+      // First time loading - position tram immediately at current GPS
+      if (!this.currentGPS) {
+        console.log('🎯 Initial tram positioning from GPS:', gpsData.source || 'unknown');
+        this.currentGPS = gpsData.current;
+        this.previousGPS = gpsData.previous || gpsData.current;
+        
+        // Position tram immediately at current GPS location
+        this.positionTramImmediately(this.currentGPS.lat, this.currentGPS.lon);
+        
+        this.lastUpdateTime = Date.now();
+        return;
+      }
+      
+      // For subsequent updates, check if GPS coordinates have actually changed
+      const hasChanged = this.webSocketGPS.hasGPSChanged ? 
+        this.webSocketGPS.hasGPSChanged(gpsData.current, this.currentGPS) : true;
+      
+      if (!hasChanged) {
+        // Don't log unchanged coordinates to reduce noise
+        this.stopTramMovement();
+        return;
+      }
+      
+      // GPS has changed - update tram position with smooth movement
+      this.previousGPS = { ...this.currentGPS };
+      this.currentGPS = gpsData.current;
+      
+      // Update tram position with smooth movement
+      this.updateTramPosition();
+      
+      this.lastUpdateTime = Date.now();
+      
+      // Only log movement in development
+      if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+        console.log('📍 Tram moving to:', {
+          lat: this.currentGPS.lat.toFixed(6), 
+          lon: this.currentGPS.lon.toFixed(6),
+          source: gpsData.source || 'unknown'
+        });
+      }
+    } else {
+      console.warn('⚠️ No current GPS data - keeping tram stationary');
+      this.stopTramMovement();
+    }
+  }
+
+
 
   // Position tram immediately at GPS coordinates (for initial loading)
   positionTramImmediately(lat, lon) {
@@ -248,8 +296,29 @@ class TramMovement {
     this.updateTramPosition();
   }
 
-  handleRedisError() {
-    console.warn('⚠️ Redis GPS unavailable, checking fallback options...');
+  handleConnectionLoss() {
+    console.warn('⚠️ WebSocket connection lost, maintaining last known position...');
+    
+    // Stop current movement but maintain position
+    this.stopTramMovement();
+    
+    // Update connection status for UI
+    this.lastConnectionLoss = Date.now();
+  }
+
+  handleConnectionRestored() {
+    console.log('✅ WebSocket connection restored, requesting fresh GPS data...');
+    
+    // Request fresh GPS data
+    if (this.webSocketGPS && this.webSocketGPS.isConnectionHealthy()) {
+      this.webSocketGPS.requestGPSData();
+    }
+    
+    this.lastConnectionLoss = null;
+  }
+
+  handleConnectionError() {
+    console.warn('⚠️ WebSocket GPS unavailable, checking fallback options...');
     
     // Use last known position if available
     if (this.lastKnownPosition && this.tram) {
@@ -289,10 +358,6 @@ class TramMovement {
   switchToFallbackMode() {
     this.isRealTimeMode = false;
     
-    if (this.trackingInterval) {
-      clearInterval(this.trackingInterval);
-    }
-    
     // Position tram at first fallback point
     if (this.fallbackGPSPoints && this.fallbackGPSPoints.length > 0) {
       const firstPoint = this.fallbackGPSPoints[0];
@@ -329,9 +394,20 @@ class TramMovement {
       this.currentTween = null;
     }
     
-    if (this.trackingInterval) {
-      clearInterval(this.trackingInterval);
-      this.trackingInterval = null;
+    // Unsubscribe from WebSocket events
+    if (this.unsubscribeGPS) {
+      this.unsubscribeGPS();
+      this.unsubscribeGPS = null;
+    }
+    
+    if (this.unsubscribeConnection) {
+      this.unsubscribeConnection();
+      this.unsubscribeConnection = null;
+    }
+    
+    if (this.unsubscribeError) {
+      this.unsubscribeError();
+      this.unsubscribeError = null;
     }
     
     this.isRealTimeMode = false;
@@ -373,6 +449,8 @@ class TramMovement {
 
   // Get current progress information
   getProgress() {
+    const connectionStatus = this.webSocketGPS ? this.webSocketGPS.getConnectionStatus() : null;
+    
     return {
       currentIndex: 0, // Not applicable in real-time mode
       totalPoints: this.fallbackGPSPoints ? this.fallbackGPSPoints.length : 0,
@@ -382,18 +460,45 @@ class TramMovement {
       currentGPS: this.currentGPS,
       previousGPS: this.previousGPS,
       lastUpdateTime: this.lastUpdateTime,
-      redisStatus: this.redisGPS.getConnectionStatus()
+      webSocketStatus: connectionStatus,
+      connectionState: this.webSocketGPS ? this.webSocketGPS.getConnectionState() : 'not_initialized',
+      isConnectionHealthy: this.webSocketGPS ? this.webSocketGPS.isConnectionHealthy() : false,
+      lastConnectionLoss: this.lastConnectionLoss
     };
   }
 
-  // Get Redis GPS service status
-  getRedisStatus() {
-    return this.redisGPS.getConnectionStatus();
+  // Get WebSocket GPS service status
+  getWebSocketStatus() {
+    if (!this.webSocketGPS) {
+      return {
+        isConnected: false,
+        hasCurrentGPS: false,
+        hasPreviousGPS: false,
+        connectionType: 'not_initialized',
+        error: 'WebSocket service not initialized'
+      };
+    }
+    
+    try {
+      return this.webSocketGPS.getConnectionStatus();
+    } catch (error) {
+      console.error('❌ Error getting WebSocket status:', error);
+      return {
+        isConnected: false,
+        hasCurrentGPS: false,
+        hasPreviousGPS: false,
+        connectionType: 'error',
+        error: error.message
+      };
+    }
   }
 
-  // Configure Redis connection
-  configureRedis(config) {
-    this.redisGPS = new RedisGPSService(config);
+  // Configure WebSocket connection
+  configureWebSocket(config) {
+    if (this.webSocketGPS) {
+      this.webSocketGPS.disconnect();
+    }
+    this.webSocketGPS = new WebSocketGPSService(config);
     if (this.isRealTimeMode) {
       this.startRealTimeTracking();
     }
@@ -403,8 +508,8 @@ class TramMovement {
   dispose() {
     this.stop();
     
-    if (this.redisGPS) {
-      this.redisGPS.disconnect();
+    if (this.webSocketGPS) {
+      this.webSocketGPS.disconnect();
     }
     
     console.log('🚊 TramMovement disposed');
