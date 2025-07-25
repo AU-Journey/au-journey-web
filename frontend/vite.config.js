@@ -17,7 +17,17 @@ export default defineConfig(({ command, mode }) => {
         input: {
           main: resolve(__dirname, 'index.html'),
         },
-      }
+        output: {
+          // Ensure proper chunking and asset handling
+          chunkFileNames: 'assets/js/[name]-[hash].js',
+          entryFileNames: 'assets/js/[name]-[hash].js',
+          assetFileNames: 'assets/[ext]/[name]-[hash].[ext]'
+        }
+      },
+      // Ensure source maps in production for debugging
+      sourcemap: true,
+      // Ensure clean builds
+      emptyOutDir: true
     },
     publicDir: 'public',
     server: {
