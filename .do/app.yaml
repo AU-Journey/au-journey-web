@@ -1,0 +1,29 @@
+name: au-journey-backend
+services:
+- name: backend
+  source_dir: /backend
+  github:
+    repo: your-username/au-journey-web
+    branch: main
+    deploy_on_push: true
+  run_command: npm start
+  environment_slug: node-js
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  http_port: 8080
+  envs:
+  - key: NODE_ENV
+    value: production
+  - key: PORT
+    value: "8080"
+  - key: REDIS_HOST
+    value: redis-15238.crce178.ap-east-1-1.ec2.redns.redis-cloud.com
+  - key: REDIS_PORT
+    value: "15238"
+  - key: REDIS_PASSWORD
+    value: HOwS9Ta53CidWxys59VlS51v2yp88tY9
+    type: SECRET
+  - key: REDIS_DB
+    value: "0"
+  health_check:
+    http_path: /health

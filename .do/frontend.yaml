@@ -1,0 +1,13 @@
+name: au-journey-frontend
+static_sites:
+- name: frontend
+  source_dir: /frontend
+  github:
+    repo: your-username/au-journey-web
+    branch: main
+    deploy_on_push: true
+  build_command: npm run build
+  output_dir: dist
+  index_document: index.html
+  error_document: index.html
+  environment_slug: node-js
