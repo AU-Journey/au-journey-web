@@ -53,6 +53,41 @@ function broadcastGPSData(gpsData) {
   console.log('📡 Broadcasted GPS data to', io.engine.clientsCount, 'connected clients');
 }
 
+// Monitor Redis for GPS data changes using polling
+let lastGPSData = null;
+let gpsMonitoringInterval = null;
+
+function startRedisGPSMonitoring() {
+  console.log('🔍 Starting Redis GPS monitoring...');
+  
+  // Poll Redis every 2 seconds for GPS data changes
+  gpsMonitoringInterval = setInterval(async () => {
+    try {
+      const result = await redis.get('gps_data');
+      if (result) {
+        const currentGPSData = JSON.parse(result);
+        
+        // Check if GPS data has changed
+        if (!lastGPSData || JSON.stringify(currentGPSData) !== JSON.stringify(lastGPSData)) {
+          console.log('📍 GPS data changed in Redis, broadcasting to clients...');
+          broadcastGPSData(currentGPSData);
+          lastGPSData = currentGPSData;
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error monitoring Redis GPS data:', error);
+    }
+  }, 2000); // Check every 2 seconds
+}
+
+function stopRedisGPSMonitoring() {
+  if (gpsMonitoringInterval) {
+    clearInterval(gpsMonitoringInterval);
+    gpsMonitoringInterval = null;
+    console.log('🛑 Stopped Redis GPS monitoring');
+  }
+}
+
 // Create Redis client
 const redis = new Redis(redisConfig);
 
@@ -67,6 +102,9 @@ redis.on('error', (err) => {
 
 redis.on('ready', () => {
   console.log('🚀 Redis client is ready!');
+  
+  // Start monitoring Redis for GPS data changes
+  startRedisGPSMonitoring();
 });
 
 // Health check endpoint
@@ -176,19 +214,21 @@ io.on('connection', (socket) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 AU Journey Web Server running on http://0.0.0.0:${PORT}`);
   console.log(`🔌 WebSocket server ready for connections`);
-  console.log(`📍 GPS data: Real-time via WebSocket events`);
+  console.log(`📍 GPS data: Real-time via Redis monitoring + WebSocket events`);
   console.log(`🏥 Health check: http://0.0.0.0:${PORT}/health`);
 });
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('\n🛑 Shutting down AU Journey Web Server...');
+  stopRedisGPSMonitoring();
   await redis.disconnect();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   console.log('\n🛑 Received SIGTERM, shutting down AU Journey Web Server...');
+  stopRedisGPSMonitoring();
   await redis.disconnect();
   process.exit(0);
 }); 
