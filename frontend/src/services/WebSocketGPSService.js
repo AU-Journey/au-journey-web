@@ -47,19 +47,16 @@ class WebSocketGPSService {
       if (hostname === 'localhost') {
         return 'ws://localhost:3000';
       } else {
-        // Production: Use environment variable or construct from current host
+        // Production: Use environment variable first
         const backendUrl = import.meta.env.VITE_BACKEND_URL;
         if (backendUrl) {
           return backendUrl.replace('https://', 'wss://').replace('http://', 'ws://');
         }
         
-        // Fallback: assume backend is on same subdomain pattern
-        // e.g., if frontend is on abc-frontend.ondigitalocean.app
-        // then backend is on abc-backend.ondigitalocean.app
+        // DigitalOcean App Platform URLs
+        // You'll replace 'your-backend-app' with your actual app name
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const frontendHost = window.location.hostname;
-        const backendHost = frontendHost.replace('-frontend', '-backend').replace('frontend-', 'backend-');
-        return `${protocol}//${backendHost}`;
+        return `${protocol}//your-backend-app.ondigitalocean.app`;
       }
     }
     return 'ws://localhost:3000';

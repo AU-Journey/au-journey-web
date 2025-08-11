@@ -16,14 +16,16 @@ const io = new Server(server, {
   cors: {
     origin: [
       "http://localhost:5173",
-      "https://localhost:5173", 
-      process.env.FRONTEND_URL || "http://localhost:5173"
+      "https://localhost:5173",
+      process.env.FRONTEND_URL || "http://localhost:5173",
+      // Add DigitalOcean domains
+      /.*\.ondigitalocean\.app$/
     ],
     methods: ["GET", "POST"],
     credentials: true
   }
 });
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 // Enable CORS for all routes
 app.use(cors());
