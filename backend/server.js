@@ -65,10 +65,20 @@ let lastGPSData = null;
 let gpsMonitoringInterval = null;
 
 function startRedisGPSMonitoring() {
+  if (!redis || !isRedisConnected) {
+    console.log('⚠️ Cannot start Redis GPS monitoring - Redis not connected');
+    return;
+  }
+  
   console.log('🔍 Starting Redis GPS monitoring...');
   
   // Poll Redis every 2 seconds for GPS data changes
   gpsMonitoringInterval = setInterval(async () => {
+    if (!redis || !isRedisConnected) {
+      console.log('⚠️ Redis disconnected, skipping GPS monitoring check');
+      return;
+    }
+    
     try {
       const result = await redis.get('gps_data');
       if (result) {
@@ -95,42 +105,65 @@ function stopRedisGPSMonitoring() {
   }
 }
 
-// Create Redis client
-const redis = new Redis(redisConfig);
+// Create Redis client with better error handling
+let redis;
+let isRedisConnected = false;
 
-// Redis event handlers
-redis.on('connect', () => {
-  console.log('✅ Connected to Redis successfully!');
-});
-
-redis.on('error', (err) => {
-  console.error('❌ Redis connection error:', err.message);
-});
-
-redis.on('ready', () => {
-  console.log('🚀 Redis client is ready!');
+try {
+  redis = new Redis(redisConfig);
   
-  // Start monitoring Redis for GPS data changes
-  startRedisGPSMonitoring();
-});
+  // Redis event handlers
+  redis.on('connect', () => {
+    console.log('✅ Connected to Redis successfully!');
+    isRedisConnected = true;
+  });
+
+  redis.on('error', (err) => {
+    console.error('❌ Redis connection error:', err.message);
+    isRedisConnected = false;
+    // Don't crash the server, just log the error
+  });
+
+  redis.on('ready', () => {
+    console.log('🚀 Redis client is ready!');
+    isRedisConnected = true;
+    
+    // Start monitoring Redis for GPS data changes
+    startRedisGPSMonitoring();
+  });
+
+  redis.on('close', () => {
+    console.log('🔌 Redis connection closed');
+    isRedisConnected = false;
+  });
+
+} catch (error) {
+  console.error('❌ Failed to create Redis client:', error.message);
+  console.log('⚠️ Server will continue without Redis (health check will show redis: disconnected)');
+}
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
-  try {
-    await redis.ping();
-    res.json({ 
-      status: 'healthy', 
-      redis: 'connected',
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      status: 'unhealthy', 
-      redis: 'disconnected',
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
+  let redisStatus = 'disconnected';
+  
+  if (redis && isRedisConnected) {
+    try {
+      await redis.ping();
+      redisStatus = 'connected';
+    } catch (error) {
+      console.error('❌ Redis ping failed:', error.message);
+      redisStatus = 'disconnected';
+    }
   }
+  
+  // Server is healthy even if Redis is down
+  res.json({ 
+    status: 'healthy', 
+    redis: redisStatus,
+    timestamp: new Date().toISOString(),
+    port: PORT,
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
 // Note: All GPS functionality now handled via WebSocket events
@@ -158,6 +191,14 @@ io.on('connection', (socket) => {
   
   // Handle GPS data requests
   socket.on('request-gps-data', async () => {
+    if (!redis || !isRedisConnected) {
+      socket.emit('gps-error', { 
+        error: 'Redis not available',
+        message: 'Redis connection is not established'
+      });
+      return;
+    }
+    
     try {
       const result = await redis.get('gps_data');
       if (result) {
@@ -229,13 +270,25 @@ server.listen(PORT, '0.0.0.0', () => {
 process.on('SIGINT', async () => {
   console.log('\n🛑 Shutting down AU Journey Web Server...');
   stopRedisGPSMonitoring();
-  await redis.disconnect();
+  if (redis) {
+    try {
+      await redis.disconnect();
+    } catch (error) {
+      console.log('⚠️ Error disconnecting from Redis:', error.message);
+    }
+  }
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   console.log('\n🛑 Received SIGTERM, shutting down AU Journey Web Server...');
   stopRedisGPSMonitoring();
-  await redis.disconnect();
+  if (redis) {
+    try {
+      await redis.disconnect();
+    } catch (error) {
+      console.log('⚠️ Error disconnecting from Redis:', error.message);
+    }
+  }
   process.exit(0);
 }); 
