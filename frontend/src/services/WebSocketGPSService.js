@@ -54,9 +54,9 @@ class WebSocketGPSService {
         }
         
         // DigitalOcean App Platform URLs
-        // You'll replace 'your-backend-app' with your actual app name
+        // Using your actual backend URL
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${protocol}//your-backend-app.ondigitalocean.app`;
+        return `${protocol}//au-journey-web-backend-gk6n3.ondigitalocean.app`;
       }
     }
     return 'ws://localhost:3000';

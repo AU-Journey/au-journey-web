@@ -2,9 +2,9 @@ import { defineConfig } from 'vite'
 import { resolve } from 'path'
 
 export default defineConfig(({ command, mode }) => {
-  // For GitHub Pages deployment, use repository name as base path
-  // For local development, use root path
-  const base = process.env.NODE_ENV === 'production' ? '/au-journey-web/' : '/'
+  // For DigitalOcean static site deployment, use root path
+  // This works for both local development and production
+  const base = '/'
   
   console.log(`Building with base path: ${base} (mode: ${mode})`)
   
@@ -31,12 +31,16 @@ export default defineConfig(({ command, mode }) => {
     },
     publicDir: 'public',
     server: {
+      port: 5173,
       // Disable caching for model files during development
       headers: {
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0'
       }
+    },
+    preview: {
+      port: 4173,
     },
     // Prevent aggressive caching of model files
     define: {
