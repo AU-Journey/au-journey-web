@@ -3,7 +3,7 @@ static_sites:
 - name: frontend
   source_dir: /frontend
   github:
-    repo: AU-Journey/au-journey-web  # Replace with your GitHub username/repo
+    repo: AU-Journey/au-journey-web
     branch: main
     deploy_on_push: true
   build_command: npm run build
