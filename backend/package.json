@@ -4,7 +4,6 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "build": "npm install",
     "dev": "nodemon server.js",
     "test": "jest",
     "test:websocket": "node test-websocket.js"
